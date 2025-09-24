@@ -1,0 +1,9 @@
+CountryId,CountryCode,CountryName_E,CountryName_A,IsActive,CreatedBy,CreatedOn
+1,SA,Saudi Arabia,المملكة العربية السعودية,1,SYSTEM,2025-09-23 08:57:56
+2,AE,United Arab Emirates,الإمارات العربية المتحدة,1,SYSTEM,2025-09-23 08:57:56
+3,IN,India,الهند,1,SYSTEM,2025-09-23 08:57:56
+4,UK,United Kingdom,المملكة المتحدة,1,SYSTEM,2025-09-23 08:57:56
+5,US,United States,الولايات المتحدة,1,SYSTEM,2025-09-23 08:57:56
+6,AU,Australia,أستراليا,1,SYSTEM,2025-09-23 08:57:56
+7,JP,Japan,اليابان,1,SYSTEM,2025-09-23 08:57:56
+8,SG,Singapore,سنغافورة,1,SYSTEM,2025-09-23 08:57:56

@@ -1,0 +1,11 @@
+CityRegionId,CountryId,CityName_E,CityName_A,StateProvince,TimezoneInfoId,WorkingHoursStart,WorkingHoursEnd,WeekendDays,BusinessCulture,CreatedBy,CreatedOn
+1,1,Riyadh,الرياض,,1,09:00,18:00,"Fri,Sat",Middle Eastern,SYSTEM,2025-09-23 08:57:56
+2,1,Jeddah,جدة,,1,09:00,18:00,"Fri,Sat",Middle Eastern,SYSTEM,2025-09-23 08:57:56
+3,2,Dubai,دبي,,2,09:00,18:00,"Sat,Sun",Middle Eastern,SYSTEM,2025-09-23 08:57:56
+4,2,Abu Dhabi,أبو ظبي,,2,09:00,18:00,"Sat,Sun",Middle Eastern,SYSTEM,2025-09-23 08:57:56
+5,3,Mumbai,مومباي,,3,09:30,18:30,"Sat,Sun",Indian,SYSTEM,2025-09-23 08:57:56
+6,3,Delhi,دلهي,,3,09:30,18:30,"Sat,Sun",Indian,SYSTEM,2025-09-23 08:57:56
+7,4,London,لندن,,4,09:00,17:30,"Sat,Sun",Western,SYSTEM,2025-09-23 08:57:56
+8,5,New York,نيويورك,,5,09:00,17:00,"Sat,Sun",Western,SYSTEM,2025-09-23 08:57:56
+9,6,Sydney,سيدني,,8,09:00,17:00,"Sat,Sun",Western,SYSTEM,2025-09-23 08:57:56
+10,7,Tokyo,طوكيو,,9,09:00,18:00,"Sat,Sun",Asian,SYSTEM,2025-09-23 08:57:56

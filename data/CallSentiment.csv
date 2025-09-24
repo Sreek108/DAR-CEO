@@ -1,0 +1,4 @@
+SentimentId,SentimentName_E,SentimentName_A,IsActive,CreatedBy,CreatedOn
+1,Positive,إيجابي,1,SYSTEM,2025-09-23 08:57:56
+2,Neutral,محايد,1,SYSTEM,2025-09-23 08:57:56
+3,Negative,سلبي,1,SYSTEM,2025-09-23 08:57:56

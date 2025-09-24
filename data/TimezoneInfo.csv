@@ -1,0 +1,11 @@
+TimezoneInfoId,TimeZoneId,DisplayName_E,DisplayName_A,UTCOffset,SupportsDST,IsActive,CreatedBy,CreatedOn
+1,Asia/Riyadh,Arabia Standard Time,التوقيت العربي المعياري,+03:00,0,1,SYSTEM,2025-09-23 08:57:56
+2,Asia/Dubai,Gulf Standard Time,توقيت الخليج المعياري,+04:00,0,1,SYSTEM,2025-09-23 08:57:56
+3,Asia/Kolkata,India Standard Time,التوقيت الهندي المعياري,+05:30,0,1,SYSTEM,2025-09-23 08:57:56
+4,Europe/London,GMT/BST,توقيت غرينتش,+00:00,1,1,SYSTEM,2025-09-23 08:57:56
+5,America/New_York,Eastern Time,التوقيت الشرقي,-05:00,1,1,SYSTEM,2025-09-23 08:57:56
+6,America/Chicago,Central Time,التوقيت المركزي,-06:00,1,1,SYSTEM,2025-09-23 08:57:56
+7,America/Los_Angeles,Pacific Time,توقيت المحيط الهادئ,-08:00,1,1,SYSTEM,2025-09-23 08:57:56
+8,Australia/Sydney,Australian Eastern Time,التوقيت الأسترالي الشرقي,+10:00,1,1,SYSTEM,2025-09-23 08:57:56
+9,Asia/Tokyo,Japan Standard Time,التوقيت الياباني المعياري,+09:00,0,1,SYSTEM,2025-09-23 08:57:56
+10,Asia/Singapore,Singapore Standard Time,توقيت سنغافورة المعياري,+08:00,0,1,SYSTEM,2025-09-23 08:57:56

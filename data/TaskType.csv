@@ -1,0 +1,7 @@
+TaskTypeId,TypeName_E,TypeName_A,IsActive,CreatedBy,CreatedOn
+1,Call,مكالمة,1,SYSTEM,2025-09-23 08:57:56
+2,Email,بريد إلكتروني,1,SYSTEM,2025-09-23 08:57:56
+3,Meeting,اجتماع,1,SYSTEM,2025-09-23 08:57:56
+4,Demo,عرض توضيحي,1,SYSTEM,2025-09-23 08:57:56
+5,WhatsApp,واتساب,1,SYSTEM,2025-09-23 08:57:56
+6,Follow-up Document,مستند متابعة,1,SYSTEM,2025-09-23 08:57:56
