@@ -15,6 +15,16 @@ try:
 except Exception:
     HAS_OPTION_MENU = False
 
+# Optional ML deps
+SKLEARN_OK = True
+try:
+    from sklearn.model_selection import train_test_split
+    from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+    from sklearn.calibration import CalibratedClassifierCV
+    from sklearn.metrics import roc_auc_score
+except Exception:
+    SKLEARN_OK = False
+
 # -----------------------------------------------------------------------------
 # Page config and theme
 # -----------------------------------------------------------------------------
@@ -248,7 +258,12 @@ fdata = filter_by_date(data, grain)
 # -----------------------------------------------------------------------------
 # Navigation
 # -----------------------------------------------------------------------------
-NAV = [("Executive","speedometer2","🎯 Executive Summary"),("Lead Status","people","📈 Lead Status"),("AI Calls","telephone","📞 AI Call Activity")]
+NAV = [
+    ("Executive","speedometer2","🎯 Executive Summary"),
+    ("Lead Status","people","📈 Lead Status"),
+    ("AI Calls","telephone","📞 AI Call Activity"),
+    ("AI Insights","robot","🤖 AI Insights")
+]
 if HAS_OPTION_MENU:
     selected = option_menu(None, [n[0] for n in NAV], icons=[n[1] for n in NAV], orientation="horizontal", default_index=0,
                            styles={"container":{"padding":"0!important","background-color":"#0f1116"},
@@ -521,6 +536,147 @@ def show_executive_summary(d):
         """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
+# AI Insights page (Lead propensity + Forecast + Actions)
+# -----------------------------------------------------------------------------
+def _recent_agg(df, when_col, cutoff, days=14):
+    if df is None or len(df)==0 or when_col not in df: 
+        return pd.DataFrame({"LeadId":[], "n":[], "connected":[], "mean_dur":[], "last_days":[]})
+    x = df.copy()
+    x[when_col] = pd.to_datetime(x[when_col], errors="coerce")
+    window = cutoff - pd.Timedelta(days=days)
+    x = x[(x[when_col]>=window) & (x[when_col]<=cutoff)]
+    g = x.groupby("LeadId").agg(
+        n=("LeadId","count"),
+        connected=("CallStatusId", lambda s: (s==1).mean() if "CallStatusId" in x.columns else 0.0),
+        mean_dur=("DurationSeconds", "mean") if "DurationSeconds" in x.columns else ("LeadId","count")
+    ).reset_index()
+    last = x.groupby("LeadId")[when_col].max().reset_index().rename(columns={when_col:"last_dt"})
+    g = g.merge(last, on="LeadId", how="left")
+    g["last_days"] = (cutoff - g["last_dt"]).dt.days.fillna(999)
+    return g.drop(columns=["last_dt"], errors="ignore")
+
+def _weekly_meeting_series(meets):
+    if meets is None or len(meets)==0: 
+        return pd.DataFrame({"week":[], "meetings":[]})
+    m = meets.copy()
+    dt_col = "StartDateTime" if "StartDateTime" in m.columns else ("startdatetime" if "startdatetime" in m.columns else None)
+    if dt_col is None: return pd.DataFrame({"week":[], "meetings":[]})
+    m["dt"] = pd.to_datetime(m[dt_col], errors="coerce")
+    sid = "MeetingStatusId" if "MeetingStatusId" in m.columns else ("meetingstatusid" if "meetingstatusid" in m.columns else None)
+    if sid is not None: m = m[m[sid].isin([1,6])]
+    g = m.groupby(pd.Grouper(key="dt", freq="W-MON")).size().reset_index(name="meetings").rename(columns={"dt":"week"})
+    return g
+
+def _weekly_wins_series(leads):
+    if leads is None or len(leads)==0: 
+        return pd.DataFrame({"week":[], "wins":[]})
+    l = leads.copy()
+    l["dt"] = pd.to_datetime(l["CreatedOn"], errors="coerce")
+    if "LeadStatusId" in l.columns:
+        l = l[l["LeadStatusId"].astype("Int64")==9]
+    g = l.groupby(pd.Grouper(key="dt", freq="W-MON")).size().reset_index(name="wins").rename(columns={"dt":"week"})
+    return g
+
+def _sma_forecast(vals, k=4):
+    if len(vals)==0: return [0.0]*k
+    s = pd.Series(vals)
+    last = s.rolling(min_periods=1, window=min(4,len(s))).mean().iloc[-1]
+    return [float(last)]*k
+
+def show_ai_insights(d):
+    st.subheader("Lead win propensity and next-best-actions")
+    leads = d.get("leads"); calls = d.get("calls"); meets = d.get("agent_meeting_assignment")
+    if leads is None or len(leads)==0:
+        st.info("No data available to train insights."); return
+
+    # Prepare label
+    won_id = 9
+    leads = leads.copy()
+    leads["CreatedOn"] = pd.to_datetime(leads["CreatedOn"], errors="coerce")
+    leads["label"] = (leads.get("LeadStatusId", pd.Series(index=leads.index).astype("Int64")).astype("Int64")==won_id).astype(int)
+    cutoff = leads["CreatedOn"].max() if "CreatedOn" in leads.columns else pd.Timestamp.today()
+
+    # Feature engineering (14-day recency windows)
+    calls_14 = _recent_agg(calls, "CallDateTime", cutoff, 14)
+    meet_norm = None
+    if meets is not None and len(meets):
+        m = meets.copy()
+        dtc = "StartDateTime" if "StartDateTime" in m.columns else ("startdatetime" if "startdatetime" in m.columns else None)
+        if dtc is not None:
+            m[dtc] = pd.to_datetime(m[dtc], errors="coerce")
+            sid = "MeetingStatusId" if "MeetingStatusId" in m.columns else ("meetingstatusid" if "meetingstatusid" in m.columns else None)
+            if sid is not None: m = m[m[sid].isin([1,6])]
+            m = m.rename(columns={dtc:"When"})
+            meet_norm = _recent_agg(m, "When", cutoff, 14).rename(columns={"n":"meet_n","connected":"meet_connected","mean_dur":"meet_mean_dur","last_days":"meet_last_days"})
+    if meet_norm is None:
+        meet_norm = pd.DataFrame({"LeadId":[], "meet_n":[], "meet_connected":[], "meet_mean_dur":[], "meet_last_days":[]})
+
+    # Assemble X
+    X = leads[["LeadId","LeadStageId","LeadStatusId","AssignedAgentId"]].fillna(0).copy()
+    X["age_days"] = (cutoff - leads["CreatedOn"]).dt.days.fillna(0)
+    X = X.merge(calls_14, on="LeadId", how="left").merge(meet_norm, on="LeadId", how="left").fillna(0)
+    y = leads["label"].values
+
+    # Train model or fallback
+    if SKLEARN_OK and len(leads)>=10 and y.sum()>=1:
+        X_fit = X.drop(columns=["LeadId"])
+        X_tr, X_te, y_tr, y_te = train_test_split(X_fit, y, test_size=0.25, random_state=42, stratify=y if y.sum()>0 else None)
+        base = GradientBoostingClassifier(random_state=42)
+        model = CalibratedClassifierCV(base, cv=3)
+        model.fit(X_tr, y_tr)
+        auc = roc_auc_score(y_te, model.predict_proba(X_te)[:,1]) if len(np.unique(y_te))>1 else np.nan
+        win_prob = model.predict_proba(X_fit)[:,1]
+        st.metric("Validation AUC", f"{auc:.3f}" if not np.isnan(auc) else "—")
+    else:
+        # Heuristic fallback
+        st.info("Using heuristic scoring (ML library unavailable or insufficient data).")
+        win_prob = (
+            0.15
+            + 0.25*(X["LeadStatusId"].astype(int).isin([6,7,8]).astype(float))
+            + 0.25*(X["meet_n"].clip(0,3)/3.0)
+            + 0.20*(X["connected"].clip(0,1))
+            + 0.15*(1.0/(1.0+X["age_days"]/30.0))
+        ).clip(0,1).values
+
+    # Score + actions
+    scored = leads[["LeadId","LeadStatusId"]].copy()
+    scored["win_prob"] = win_prob
+
+    tmp = X.merge(scored, on="LeadId", how="left")
+    def nba(r):
+        if r["win_prob"]>=0.60 and r.get("meet_n",0)==0: return "Book meeting within 72h"
+        if 0.30<=r["win_prob"]<0.60 and r.get("connected",0)<0.30: return "Nurture call + brochure"
+        if r["win_prob"]<0.30 and r.get("n",0)>=2: return "Switch to AI Agent sequence"
+        return "Maintain cadence"
+    scored["next_action"] = [nba(r) for _,r in tmp.iterrows()]
+    st.dataframe(scored.sort_values("win_prob", ascending=False).reset_index(drop=True),
+                 use_container_width=True, hide_index=True)
+
+    # Forecasts
+    st.markdown("---"); st.subheader("4‑week outlook")
+    wm = _weekly_meeting_series(meets)
+    ww = _weekly_wins_series(leads)
+    f_meet = _sma_forecast(wm["meetings"] if len(wm) else [], 4)
+    f_wins = _sma_forecast(ww["wins"] if len(ww) else [], 4)
+    c1,c2 = st.columns(2)
+    with c1: st.metric("Forecast avg meetings / week (next 4)", f"{np.mean(f_meet):.1f}")
+    with c2: st.metric("Forecast avg wins / week (next 4)", f"{np.mean(f_wins):.1f}")
+
+    # Small history charts
+    col1, col2 = st.columns(2)
+    with col1:
+        hist = wm.copy()
+        hist["type"]="Meetings"
+        fig = px.line(hist, x="week", y="meetings", markers=True, title="Weekly meetings")
+        fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white", height=260)
+        st.plotly_chart(fig, use_container_width=True)
+    with col2:
+        hist = ww.copy()
+        fig = px.line(hist, x="week", y="wins", markers=True, title="Weekly wins")
+        fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white", height=260)
+        st.plotly_chart(fig, use_container_width=True)
+
+# -----------------------------------------------------------------------------
 # Lead Status page
 # -----------------------------------------------------------------------------
 def show_lead_status(d):
@@ -580,7 +736,9 @@ if HAS_OPTION_MENU:
     if selected=="Executive": show_executive_summary(fdata)
     elif selected=="Lead Status": show_lead_status(fdata)
     elif selected=="AI Calls": show_calls(fdata)
+    elif selected=="AI Insights": show_ai_insights(fdata)
 else:
     with tabs[0]: show_executive_summary(fdata)
     with tabs[1]: show_lead_status(fdata)
     with tabs[2]: show_calls(fdata)
+    with tabs[3]: show_ai_insights(fdata)
