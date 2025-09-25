@@ -1,3 +1,5 @@
+# app.py — DAR Global CEO Dashboard (works with 2‑year synthetic dataset in ./data)
+
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
@@ -16,7 +18,7 @@ except Exception:
 # -----------------------------------------------------------------------------
 # Page config and theme
 # -----------------------------------------------------------------------------
-st.set_page_config(page_title="DAR Global - Executive Dashboard", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="DAR Global - Executive Dashboard", page_icon="🏗️", layout="wide", initial_sidebar_state="expanded")
 
 EXEC_PRIMARY="#DAA520"; EXEC_BLUE="#1E90FF"; EXEC_GREEN="#32CD32"; EXEC_DANGER="#DC143C"; EXEC_BG="#1a1a1a"; EXEC_SURFACE="#2d2d2d"
 
@@ -105,10 +107,8 @@ def load_data(data_dir="data"):
             "leadstageid":"LeadStageId","leadstatusid":"LeadStatusId","leadscoringid":"LeadScoringId",
             "assignedagentid":"AssignedAgentId","createdon":"CreatedOn","isactive":"IsActive",
             "countryid":"CountryId","cityregionid":"CityRegionId",
-            # optional Budget if not present
             "estimatedbudget":"EstimatedBudget","budget":"EstimatedBudget"
         })
-        # ensure columns exist
         for col, default in [("EstimatedBudget",0.0),("LeadStageId",pd.NA),("LeadStatusId",pd.NA),
                              ("AssignedAgentId",pd.NA),("CreatedOn",pd.NaT),("IsActive",1)]:
             if col not in df.columns: df[col]=default
@@ -271,7 +271,7 @@ def show_executive_summary(d):
     won_leads = int(won_mask.sum())
     conversion_rate = (won_leads/total_leads*100) if total_leads else 0.0
 
-    # Budgets may be missing in your generator; default to 0.0
+    # Budgets may be missing; default to 0.0
     active_pipeline = leads["EstimatedBudget"].sum() if "EstimatedBudget" in leads.columns else 0.0
     won_revenue = leads.loc[won_mask, "EstimatedBudget"].sum() if ("EstimatedBudget" in leads.columns) else 0.0
 
@@ -392,8 +392,8 @@ def show_executive_summary(d):
         with s4: st.plotly_chart(tile_bullet(calls_ts,"Call success index","#7dd3fc"), use_container_width=True)
 
     # -------------------------------------------------------------------------
-    # Lead conversion snapshot — ordered funnel per requirement
-    # New → Qualified (Interested) → Meeting Scheduled → Negotiation → Contract Signed (Won) → Lost
+    # Lead conversion snapshot — REQUIRED ORDER AND NAMING
+    # New → Qualified → Meeting Scheduled → Negotiation → Signed Contract (Won) → Lost Contract (Lost)
     # -------------------------------------------------------------------------
     st.markdown("---"); st.subheader("Lead conversion snapshot")
 
@@ -428,7 +428,7 @@ def show_executive_summary(d):
     if col_in(leads_df, "LeadStageId"):  new_mask |= leads_df["LeadStageId"].astype("Int64")==1
     new_count = int(new_mask.sum())
 
-    # 2) Qualified (Interested) — status "Interested" or stage 2
+    # 2) Qualified — "Interested" or stage 2
     qualified_ids = ids_by_status_name(["Interested"]) | ids_by_stage_number(2)
     qual_mask = pd.Series(False, index=leads_df.index)
     if col_in(leads_df,"LeadStatusId"): qual_mask |= leads_df["LeadStatusId"].isin(qualified_ids)
@@ -439,13 +439,10 @@ def show_executive_summary(d):
     meet_count = 0
     meetings_df = meetings.copy() if meetings is not None else None
     if meetings_df is not None and "leadid" in meetings_df.columns:
-        # restrict to current lead universe
         if "LeadId" in leads_df.columns:
             meetings_df = meetings_df[meetings_df["leadid"].isin(leads_df["LeadId"])]
-        # status filter
         if "meetingstatusid" in meetings_df.columns:
             meetings_df = meetings_df[meetings_df["meetingstatusid"].isin({1,6})]
-        # time window align (use leads CreatedOn min/max of filtered set)
         if "startdatetime" in meetings_df.columns and "CreatedOn" in leads_df.columns:
             lo = pd.to_datetime(leads_df["CreatedOn"], errors="coerce").min()
             hi = pd.to_datetime(leads_df["CreatedOn"], errors="coerce").max()
@@ -458,22 +455,22 @@ def show_executive_summary(d):
     neg_ids = ids_by_status_name(["In Discussion","Awaiting Budget"])
     neg_count = int(leads_df["LeadStatusId"].isin(neg_ids).sum()) if col_in(leads_df,"LeadStatusId") else 0
 
-    # 5) Contract Signed (Won)
+    # 5) Signed Contract (Won)
     won_ids = ids_by_status_name(["Won"])
     won_count = int(leads_df["LeadStatusId"].isin(won_ids).sum()) if col_in(leads_df,"LeadStatusId") else 0
 
-    # 6) Lost
+    # 6) Lost Contract (Lost)
     lost_ids = ids_by_status_name(["Lost"])
     lost_count = int(leads_df["LeadStatusId"].isin(lost_ids).sum()) if col_in(leads_df,"LeadStatusId") else 0
 
     funnel_df = pd.DataFrame({
         "Stage": [
-            "New (Leads)",
-            "Qualified (Interested)",
+            "New",
+            "Qualified",
             "Meeting Scheduled",
             "Negotiation",
-            "Contract Signed (Won)",
-            "Lost"
+            "Signed Contract",
+            "Lost Contract"
         ],
         "Count": [new_count, qualified_count, meet_count, neg_count, won_count, lost_count]
     })
@@ -482,7 +479,7 @@ def show_executive_summary(d):
         funnel_df,
         x="Count",
         y="Stage",
-        color_discrete_sequence=[EXEC_BLUE, EXEC_GREEN, EXEC_PRIMARY, "#FFA500", EXEC_DANGER, "#8A2BE2"]
+        color_discrete_sequence=[EXEC_BLUE, EXEC_GREEN, EXEC_PRIMARY, "#FFA500", "#7CFC00", EXEC_DANGER]
     )
     fig_funnel.update_layout(
         height=320,
@@ -498,7 +495,6 @@ def show_executive_summary(d):
     if countries is not None and "CountryId" in leads.columns and "countryname_e" in countries.columns:
         geo = leads.groupby("CountryId").size().reset_index(name="Leads")
         geo = geo.merge(countries[["countryid","countryname_e"]].rename(columns={"countryid":"CountryId","countryname_e":"Country"}), on="CountryId", how="left")
-        # Use pipeline if budgets are present otherwise use lead count
         if "EstimatedBudget" in leads.columns and leads["EstimatedBudget"].sum()>0:
             geo_pipe = leads.groupby("CountryId")["EstimatedBudget"].sum().reset_index(name="Pipeline")
             geo = geo.merge(geo_pipe, on="CountryId", how="left"); total = float(geo["Pipeline"].sum()); geo["Share"] = (geo["Pipeline"]/total*100).round(1) if total>0 else 0.0
