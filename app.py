@@ -1,5 +1,3 @@
-# app.py — DAR Global CEO Dashboard (works with 2‑year synthetic dataset in ./data)
-
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
@@ -18,7 +16,7 @@ except Exception:
 # -----------------------------------------------------------------------------
 # Page config and theme
 # -----------------------------------------------------------------------------
-st.set_page_config(page_title="DAR Global - Executive Dashboard", page_icon="🏗️", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="DAR Global - Executive Dashboard", layout="wide", initial_sidebar_state="expanded")
 
 EXEC_PRIMARY="#DAA520"; EXEC_BLUE="#1E90FF"; EXEC_GREEN="#32CD32"; EXEC_DANGER="#DC143C"; EXEC_BG="#1a1a1a"; EXEC_SURFACE="#2d2d2d"
 
@@ -160,7 +158,7 @@ def load_data(data_dir="data"):
 # -----------------------------------------------------------------------------
 st.markdown(f"""
 <div class="main-header">
-  <h1>🏗️ DAR Global — Executive Dashboard</h1>
+  <h1> DAR Global — Executive Dashboard</h1>
   <h3>AI‑Powered Analytics</h3>
   <p style="margin: 6px 0 0 0; color: {EXEC_GREEN};">Last Updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</p>
 </div>
@@ -257,6 +255,7 @@ else:
 def show_executive_summary(d):
     leads=d.get("leads"); agents=d.get("agents"); calls=d.get("calls")
     lead_statuses=d.get("lead_statuses"); countries=d.get("countries")
+    meetings=d.get("agent_meeting_assignment")
 
     if leads is None or len(leads)==0:
         st.info("No data available in the selected range."); return
@@ -303,7 +302,6 @@ def show_executive_summary(d):
                 date_col="Date" if "Date" in spend.columns else ("SpendDate" if "SpendDate" in spend.columns else None)
                 if date_col:
                     spend[date_col]=pd.to_datetime(spend[date_col], errors="coerce")
-                    # derive min/max from current filtered window
                     pmin = pd.to_datetime(leads["CreatedOn"], errors="coerce").min()
                     pmax = pd.to_datetime(leads["CreatedOn"], errors="coerce").max()
                     m=spend[date_col].between(pmin,pmax)
@@ -393,26 +391,109 @@ def show_executive_summary(d):
         with s3: st.plotly_chart(tile_bullet(rev_ts,"Revenue index",EXEC_GREEN), use_container_width=True)
         with s4: st.plotly_chart(tile_bullet(calls_ts,"Call success index","#7dd3fc"), use_container_width=True)
 
-    # Funnel and top markets
+    # -------------------------------------------------------------------------
+    # Lead conversion snapshot — ordered funnel per requirement
+    # New → Qualified (Interested) → Meeting Scheduled → Negotiation → Contract Signed (Won) → Lost
+    # -------------------------------------------------------------------------
     st.markdown("---"); st.subheader("Lead conversion snapshot")
-    if lead_statuses is not None and "LeadStatusId" in leads.columns:
-        # order by LeadStage if available
-        order = lead_statuses.copy()
-        if "leadstageid" in order.columns:
-            # join to stage for order if SortOrder available
-            stg = d.get("lead_stages")
-            if stg is not None and "sortorder" in stg.columns:
-                order = order.merge(stg[["leadstageid","sortorder"]], on="leadstageid", how="left").sort_values("sortorder")
-        lbl_col = "statusname_e" if "statusname_e" in order.columns else (order.columns[1] if len(order.columns)>1 else "Status")
-        order = order[["leadstatusid", lbl_col]].rename(columns={"leadstatusid":"LeadStatusId", lbl_col:"Status"})
-        cnt = leads["LeadStatusId"].value_counts().rename_axis("LeadStatusId").reset_index(name="count")
-        fdf = order.merge(cnt, on="LeadStatusId", how="left").fillna({"count":0})
-        fig_funnel = px.funnel(fdf, x="count", y="Status", color_discrete_sequence=[EXEC_BLUE, EXEC_GREEN, EXEC_PRIMARY, "#FFA500", EXEC_DANGER, "#8A2BE2"])
-        fig_funnel.update_layout(height=300, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white", margin=dict(l=0,r=0,t=10,b=10))
-        st.plotly_chart(fig_funnel, use_container_width=True)
-    else:
-        st.info("Lead statuses not available for the funnel.")
 
+    statuses = d.get("lead_statuses")
+    stages   = d.get("lead_stages")
+
+    leads_df = leads.copy()
+
+    def ids_by_status_name(names):
+        if statuses is None or "statusname_e" not in statuses.columns:
+            return set()
+        want = [n.lower() for n in names]
+        col_id = "leadstatusid" if "leadstatusid" in statuses.columns else statuses.columns[0]
+        return set(
+            statuses.loc[statuses["statusname_e"].str.lower().isin(want), col_id]
+            .astype(int).tolist()
+        )
+
+    def ids_by_stage_number(stage_no):
+        if statuses is None or "leadstageid" not in statuses.columns:
+            return set()
+        col_id = "leadstatusid" if "leadstatusid" in statuses.columns else statuses.columns[0]
+        return set(statuses.loc[statuses["leadstageid"].astype("Int64")==stage_no, col_id].astype(int).tolist())
+
+    def col_in(df, name): 
+        return (df is not None) and (name in df.columns)
+
+    # 1) New (stage 1 or statuses under stage 1)
+    new_status_ids  = ids_by_stage_number(1)
+    new_mask = pd.Series(False, index=leads_df.index)
+    if col_in(leads_df, "LeadStatusId"): new_mask |= leads_df["LeadStatusId"].isin(new_status_ids)
+    if col_in(leads_df, "LeadStageId"):  new_mask |= leads_df["LeadStageId"].astype("Int64")==1
+    new_count = int(new_mask.sum())
+
+    # 2) Qualified (Interested) — status "Interested" or stage 2
+    qualified_ids = ids_by_status_name(["Interested"]) | ids_by_stage_number(2)
+    qual_mask = pd.Series(False, index=leads_df.index)
+    if col_in(leads_df,"LeadStatusId"): qual_mask |= leads_df["LeadStatusId"].isin(qualified_ids)
+    if col_in(leads_df,"LeadStageId"):  qual_mask |= leads_df["LeadStageId"].astype("Int64")==2
+    qualified_count = int(qual_mask.sum())
+
+    # 3) Meeting Scheduled — AgentMeetingAssignment with MeetingStatusId in {1=Scheduled, 6=Rescheduled}
+    meet_count = 0
+    meetings_df = meetings.copy() if meetings is not None else None
+    if meetings_df is not None and "leadid" in meetings_df.columns:
+        # restrict to current lead universe
+        if "LeadId" in leads_df.columns:
+            meetings_df = meetings_df[meetings_df["leadid"].isin(leads_df["LeadId"])]
+        # status filter
+        if "meetingstatusid" in meetings_df.columns:
+            meetings_df = meetings_df[meetings_df["meetingstatusid"].isin({1,6})]
+        # time window align (use leads CreatedOn min/max of filtered set)
+        if "startdatetime" in meetings_df.columns and "CreatedOn" in leads_df.columns:
+            lo = pd.to_datetime(leads_df["CreatedOn"], errors="coerce").min()
+            hi = pd.to_datetime(leads_df["CreatedOn"], errors="coerce").max()
+            if pd.notna(lo) and pd.notna(hi):
+                meetings_df["startdatetime"] = pd.to_datetime(meetings_df["startdatetime"], errors="coerce")
+                meetings_df = meetings_df[meetings_df["startdatetime"].between(lo, hi)]
+        meet_count = int(meetings_df["leadid"].nunique())
+
+    # 4) Negotiation — statuses "In Discussion" and "Awaiting Budget"
+    neg_ids = ids_by_status_name(["In Discussion","Awaiting Budget"])
+    neg_count = int(leads_df["LeadStatusId"].isin(neg_ids).sum()) if col_in(leads_df,"LeadStatusId") else 0
+
+    # 5) Contract Signed (Won)
+    won_ids = ids_by_status_name(["Won"])
+    won_count = int(leads_df["LeadStatusId"].isin(won_ids).sum()) if col_in(leads_df,"LeadStatusId") else 0
+
+    # 6) Lost
+    lost_ids = ids_by_status_name(["Lost"])
+    lost_count = int(leads_df["LeadStatusId"].isin(lost_ids).sum()) if col_in(leads_df,"LeadStatusId") else 0
+
+    funnel_df = pd.DataFrame({
+        "Stage": [
+            "New (Leads)",
+            "Qualified (Interested)",
+            "Meeting Scheduled",
+            "Negotiation",
+            "Contract Signed (Won)",
+            "Lost"
+        ],
+        "Count": [new_count, qualified_count, meet_count, neg_count, won_count, lost_count]
+    })
+
+    fig_funnel = px.funnel(
+        funnel_df,
+        x="Count",
+        y="Stage",
+        color_discrete_sequence=[EXEC_BLUE, EXEC_GREEN, EXEC_PRIMARY, "#FFA500", EXEC_DANGER, "#8A2BE2"]
+    )
+    fig_funnel.update_layout(
+        height=320,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        font_color="white",
+        margin=dict(l=0, r=0, t=10, b=10)
+    )
+    st.plotly_chart(fig_funnel, use_container_width=True)
+
+    # Top markets
     st.markdown("---"); st.subheader("Top markets")
     if countries is not None and "CountryId" in leads.columns and "countryname_e" in countries.columns:
         geo = leads.groupby("CountryId").size().reset_index(name="Leads")
@@ -461,7 +542,7 @@ def show_lead_status(d):
     if leads is None or len(leads)==0 or "LeadStatusId" not in leads.columns:
         st.info("No lead status data in the selected range."); return
     lbl_map={}
-    if statuses is not None and "LeadStatusId" in statuses.columns:
+    if statuses is not None and "leadstatusid" in statuses.columns:
         name_col = "statusname_e" if "statusname_e" in statuses.columns else None
         for _,r in statuses.iterrows():
             lbl_map[int(r["leadstatusid"])]= str(r[name_col]) if name_col else f"Status {int(r['leadstatusid'])}"
@@ -480,8 +561,8 @@ def show_lead_status(d):
             m = statuses.loc[statuses["statusname_e"].str.lower()=="won"]
             if not m.empty: won_id = int(m.iloc[0]["leadstatusid"])
         won = int((leads["LeadStatusId"]==won_id).sum()) if won_id is not None else 0
-        st.metric("Won Leads", format_number(won))
-        in_discuss = int((leads["LeadStatusId"].isin(statuses.loc[statuses["statusname_e"].str.contains("discussion", case=False, na=False), "leadstatusid"]) if statuses is not None else pd.Series(False,index=leads.index)).sum())
+        disc_ids = statuses.loc[statuses["statusname_e"].str.contains("discussion", case=False, na=False), "leadstatusid"].tolist() if statuses is not None else []
+        in_discuss = int(leads["LeadStatusId"].isin(disc_ids).sum()) if len(disc_ids) else 0
         st.metric("In Discussion", format_number(in_discuss))
 
 # -----------------------------------------------------------------------------
