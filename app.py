@@ -260,70 +260,75 @@ else:
     selected=None
 
 # -----------------------------------------------------------------------------
-# Executive Summary
+# Executive Summary (Performance KPIs)
 # -----------------------------------------------------------------------------
 def show_executive_summary(d):
-    leads=d.get("leads"); agents=d.get("agents"); calls=d.get("calls")
-    lead_statuses=d.get("lead_statuses"); countries=d.get("countries")
+    leads = d.get("leads")
+    lead_statuses = d.get("lead_statuses")
+    meetings = d.get("agent_meeting_assignment")
 
-    if leads is None or len(leads)==0:
-        st.info("No data available in the selected range."); return
+    if leads is None or len(leads) == 0:
+        st.info("No data available in the selected range.")
+        return
 
-    # 'Won' status id
+    # Resolve Won status id
     won_status_id = 9
     if lead_statuses is not None and "statusname_e" in lead_statuses.columns:
-        match = lead_statuses.loc[lead_statuses["statusname_e"].str.lower()=="won"]
+        match = lead_statuses.loc[lead_statuses["statusname_e"].str.lower() == "won"]
         if not match.empty and "leadstatusid" in match.columns:
             won_status_id = int(match.iloc[0]["leadstatusid"])
 
-    total_leads = len(leads)
-    won_mask = leads["LeadStatusId"].eq(won_status_id) if "LeadStatusId" in leads.columns else pd.Series(False, index=leads.index)
-    won_leads = int(won_mask.sum())
-    conversion_rate = (won_leads/total_leads*100) if total_leads else 0.0
+    # Date windows
+    today = pd.Timestamp.today().normalize()
+    week_start = today - pd.Timedelta(days=today.weekday())
+    month_start = today.replace(day=1)
+    year_start = today.replace(month=1, day=1)
+    date_ranges = {
+        "Week to Date": (week_start, today),
+        "Month to Date": (month_start, today),
+        "Year to Date": (year_start, today),
+    }
 
-    active_pipeline = leads["EstimatedBudget"].sum() if "EstimatedBudget" in leads.columns else 0.0
-    won_revenue = leads.loc[won_mask, "EstimatedBudget"].sum() if ("EstimatedBudget" in leads.columns) else 0.0
+    # Render Performance KPIs (replacing classic exec KPIs)
+    st.subheader("Performance KPIs")
+    cols = st.columns(3)
+    for (label, (start, end)), col in zip(date_ranges.items(), cols):
+        # Leads in window
+        leads_period = leads.loc[(pd.to_datetime(leads["CreatedOn"], errors="coerce") >= pd.Timestamp(start)) &
+                                 (pd.to_datetime(leads["CreatedOn"], errors="coerce") <= pd.Timestamp(end))] \
+            if "CreatedOn" in leads.columns else pd.DataFrame()
 
-    total_calls = len(calls) if calls is not None else 0
-    connected_calls = int((calls["CallStatusId"]==1).sum()) if (calls is not None and "CallStatusId" in calls.columns) else 0
-    call_success_rate = (connected_calls/total_calls*100) if total_calls else 0.0
-
-    active_agents = int(agents[agents["IsActive"]==1].shape[0]) if (agents is not None and "IsActive" in agents.columns) else (len(agents) if agents is not None else 0)
-    assigned_leads = int(leads["AssignedAgentId"].notna().sum()) if "AssignedAgentId" in leads.columns else 0
-    agent_utilization = (assigned_leads/active_agents) if active_agents else 0.0
-
-    st.subheader("🎯 Executive Summary")
-    c1,c2,c3,c4 = st.columns(4)
-    with c1: st.metric("Total Leads", format_number(total_leads))
-    with c2: st.metric("Active Pipeline", format_currency(active_pipeline))
-    with c3: st.metric("Revenue (Won)", format_currency(won_revenue))
-    with c4: st.metric("Conversion Rate", f"{conversion_rate:.1f}%")
-
-    c1,c2,c3,c4 = st.columns(4)
-    with c1: st.metric("Call Success Rate", f"{call_success_rate:.1f}%")
-    with c2: st.metric("Active Agents", format_number(active_agents))
-    with c3: st.metric("Agent Utilization", f"{agent_utilization:.1f} leads/agent")
-    with c4:
-        try:
-            spend_path=os.path.join("data","marketing_spend.csv")
-            if os.path.exists(spend_path):
-                spend=pd.read_csv(spend_path)
-                date_col="Date" if "Date" in spend.columns else ("SpendDate" if "SpendDate" in spend.columns else None)
-                if date_col:
-                    spend[date_col]=pd.to_datetime(spend[date_col], errors="coerce")
-                    pmin = pd.to_datetime(leads["CreatedOn"], errors="coerce").min()
-                    pmax = pd.to_datetime(leads["CreatedOn"], errors="coerce").max()
-                    m=spend[date_col].between(pmin,pmax)
-                    m_spend=float(spend.loc[m,"SpendUSD"].sum()) if "SpendUSD" in spend.columns else None
-                else: m_spend=None
-                roi = ((won_revenue - m_spend)/m_spend*100.0) if (m_spend and m_spend>0) else None
-                st.metric("ROI", f"{roi:,.1f}%" if roi is not None else "—")
+        # Meetings in window (AMA by StartDateTime, Scheduled/Rescheduled)
+        if meetings is not None and len(meetings) > 0:
+            m = meetings.copy(); m.columns = m.columns.str.lower()
+            date_col = "startdatetime" if "startdatetime" in m.columns else None
+            if date_col is not None:
+                m["_dt"] = pd.to_datetime(m[date_col], errors="coerce")
+                m = m[(m["_dt"] >= pd.Timestamp(start)) & (m["_dt"] <= pd.Timestamp(end))]
+                if "meetingstatusid" in m.columns:
+                    m = m[m["meetingstatusid"].isin({1,6})]
+                meetings_period = m
             else:
-                st.metric("ROI", "—")
-        except:
-            st.metric("ROI", "—")
+                meetings_period = pd.DataFrame()
+        else:
+            meetings_period = pd.DataFrame()
 
-    # Trend tiles (indexed): Leads, Conversion Rate, Meeting Scheduled
+        total_leads = int(len(leads_period))
+        won_mask = (leads_period["LeadStatusId"] == won_status_id) if "LeadStatusId" in leads_period.columns else pd.Series(False, index=leads_period.index)
+        won_leads = int(won_mask.sum())
+        conversion_rate = (won_leads / total_leads * 100.0) if total_leads else 0.0
+        meetings_scheduled = int(meetings_period["leadid"].nunique()) if "leadid" in meetings_period.columns else 0
+
+        with col:
+            st.markdown(f"#### {label}")
+            st.markdown("Total Leads")
+            st.markdown(f"<span style='font-size:2rem;'>{total_leads}</span>", unsafe_allow_html=True)
+            st.markdown("Conversion Rate")
+            st.markdown(f"<span style='font-size:2rem;'>{conversion_rate:.1f}%</span>", unsafe_allow_html=True)
+            st.markdown("Meetings Scheduled")
+            st.markdown(f"<span style='font-size:2rem;'>{meetings_scheduled}</span>", unsafe_allow_html=True)
+
+    # -------------------- Trend at a glance: Leads, Conversion Rate, Meeting Scheduled --------------------
     st.markdown("---"); st.subheader("Trend at a glance")
     trend_style = st.radio("Trend style", ["Line","Bars","Bullet"], index=0, horizontal=True, key="__trend_style_exec")
 
@@ -359,7 +364,7 @@ def show_executive_summary(d):
     else:
         meet_ts = pd.DataFrame({"period":[], "value":[]})
 
-    # Index-normalize all three for the tiles
+    # Index-normalize three series
     def _index(df):
         df=df.copy()
         if df.empty: df["idx"]=[]; return df
@@ -417,13 +422,13 @@ def show_executive_summary(d):
         with s2: st.plotly_chart(tile_bullet(conv_ts,"Conversion index",EXEC_GREEN), use_container_width=True)
         with s3: st.plotly_chart(tile_bullet(meet_ts,"Meetings index",EXEC_PRIMARY), use_container_width=True)
 
-    # --- Lead conversion snapshot (New→Qualified→Meeting→Negotiation→Signed→Lost) ---
+    # -------------------- Lead conversion snapshot (funnel) --------------------
     st.markdown("---")
     st.subheader("Lead conversion snapshot")
 
     leads_df   = d.get("leads").copy()
     statuses   = d.get("lead_statuses")
-    meetings   = d.get("agent_meeting_assignment")
+    ama        = d.get("agent_meeting_assignment")
 
     def have(df, cols): 
         return (df is not None) and set(cols).issubset(df.columns)
@@ -432,17 +437,13 @@ def show_executive_summary(d):
         if statuses is None: return set()
         s = statuses.copy(); s.columns = s.columns.str.lower()
         if not {"statusname_e","leadstatusid"}.issubset(s.columns): return set()
-        return set(
-            s.loc[s["statusname_e"].str.lower().isin([n.lower() for n in names]), "leadstatusid"].astype(int).tolist()
-        )
+        return set(s.loc[s["statusname_e"].str.lower().isin([n.lower() for n in names]), "leadstatusid"].astype(int).tolist())
 
     def status_ids_by_stage(stage_no):
         if statuses is None: return set()
         s = statuses.copy(); s.columns = s.columns.str.lower()
         if not {"leadstageid","leadstatusid"}.issubset(s.columns): return set()
-        return set(
-            s.loc[s["leadstageid"].astype("Int64")==stage_no, "leadstatusid"].astype(int).tolist()
-        )
+        return set(s.loc[s["leadstageid"].astype("Int64")==stage_no, "leadstatusid"].astype(int).tolist())
 
     # 0) Cohort: New
     cohort_ids = pd.Index(leads_df["LeadId"].dropna().astype(int).unique()) if have(leads_df, ["LeadId"]) else pd.Index([])
@@ -460,8 +461,8 @@ def show_executive_summary(d):
 
     # 2) Meeting Scheduled (AMA Scheduled/Rescheduled) ⊂ Qualified
     meet_ids = pd.Index([])
-    if meetings is not None:
-        m = meetings.copy(); m.columns = m.columns.str.lower()
+    if ama is not None:
+        m = ama.copy(); m.columns = m.columns.str.lower()
         if {"leadid","meetingstatusid"}.issubset(m.columns):
             m = m[m["leadid"].isin(qual_ids)]
             m = m[m["meetingstatusid"].isin({1,6})]
@@ -511,13 +512,14 @@ def show_executive_summary(d):
                       margin=dict(l=0, r=0, t=10, b=10))
     st.plotly_chart(fig, use_container_width=True)
 
-    # Top markets
+    # -------------------- Top markets --------------------
+    countries=d.get("countries")
     st.markdown("---"); st.subheader("Top markets")
-    if countries is not None and "CountryId" in leads.columns and "countryname_e" in countries.columns:
-        geo = leads.groupby("CountryId").size().reset_index(name="Leads")
+    if countries is not None and "CountryId" in leads_df.columns and "countryname_e" in countries.columns:
+        geo = leads_df.groupby("CountryId").size().reset_index(name="Leads")
         geo = geo.merge(countries[["countryid","countryname_e"]].rename(columns={"countryid":"CountryId","countryname_e":"Country"}), on="CountryId", how="left")
-        if "EstimatedBudget" in leads.columns and leads["EstimatedBudget"].sum()>0:
-            geo_pipe = leads.groupby("CountryId")["EstimatedBudget"].sum().reset_index(name="Pipeline")
+        if "EstimatedBudget" in leads_df.columns and leads_df["EstimatedBudget"].sum()>0:
+            geo_pipe = leads_df.groupby("CountryId")["EstimatedBudget"].sum().reset_index(name="Pipeline")
             geo = geo.merge(geo_pipe, on="CountryId", how="left"); total = float(geo["Pipeline"].sum()); geo["Share"] = (geo["Pipeline"]/total*100).round(1) if total>0 else 0.0
         else:
             total = float(geo["Leads"].sum()); geo["Share"] = (geo["Leads"]/total*100).round(1) if total>0 else 0.0
@@ -526,6 +528,7 @@ def show_executive_summary(d):
     else:
         st.info("Country data unavailable to build the markets table.")
 
+    # -------------------- Insights --------------------
     st.markdown("---"); st.subheader("🤖 AI-Powered Strategic Insights")
     c1,c2 = st.columns(2)
     with c1:
