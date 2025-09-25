@@ -413,14 +413,29 @@ def show_executive_summary(d):
     def col_in(df, name):
         return (df is not None) and (name in df.columns)
     
-    # 1) New = ALL unique leads in filtered scope
-    new_count = int(leads_df["LeadId"].nunique()) if col_in(leads_df, "LeadId") else int(len(leads_df))
+    # 1) New = ALL unique leads in filtered scope (cohort)
+    if "LeadId" in leads_df.columns:
+        cohort_ids = set(leads_df["LeadId"].unique())
+        new_count = len(cohort_ids)
+    else:
+        cohort_ids = set(range(len(leads_df)))
+        new_count = len(cohort_ids)
     
-    # 2) Qualified = Interested
-    qualified_ids = ids_by_status_name(["Interested"])
-    qualified_count = int(
-        leads_df.loc[leads_df["LeadStatusId"].isin(qualified_ids), "LeadId"].nunique()
-    ) if col_in(leads_df, "LeadStatusId") and col_in(leads_df, "LeadId") else 0
+    # 2) Qualified = Interested drawn from the same cohort (not the whole DB)
+    qualified_ids_master = ids_by_status_name(["Interested"])
+    if "LeadStatusId" in leads_df.columns and "LeadId" in leads_df.columns:
+        qualified_count = int(
+            leads_df.loc[
+                (leads_df["LeadId"].isin(cohort_ids)) &
+                (leads_df["LeadStatusId"].isin(qualified_ids_master)),
+                "LeadId"
+            ].nunique()
+        )
+    else:
+        qualified_count = 0
+    # Ensure funnel monotonicity (Qualified <= New)
+    if qualified_count > new_count:
+        qualified_count = new_count
     
     # 3) Meeting Scheduled = AMA scheduled/rescheduled for current cohort
     meet_count = 0
