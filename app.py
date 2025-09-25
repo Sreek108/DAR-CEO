@@ -389,84 +389,99 @@ def show_executive_summary(d):
         with s3: st.plotly_chart(tile_bullet(rev_ts,"Revenue index",EXEC_GREEN), use_container_width=True)
         with s4: st.plotly_chart(tile_bullet(calls_ts,"Call success index","#7dd3fc"), use_container_width=True)
 
-   # --- Lead conversion snapshot (requested structure) ---
+   # --- Lead conversion snapshot  ---
     st.markdown("---")
     st.subheader("Lead conversion snapshot")
-    
-    statuses = d.get("lead_statuses")
-    leads_df = leads.copy()
-    
-    def status_ids(names):
-        if statuses is None or "statusname_e" not in statuses.columns:
-            return set()
-        col_id = "leadstatusid" if "leadstatusid" in statuses.columns else statuses.columns[0]
-        return set(
-            statuses.loc[statuses["statusname_e"].str.lower().isin([n.lower() for n in names]), col_id]
-            .astype(int).tolist()
-        )
+
+    leads_df   = d.get("leads").copy()
+    statuses   = d.get("lead_statuses")
+    meetings   = d.get("agent_meeting_assignment")
     
     def have(df, cols): 
         return (df is not None) and set(cols).issubset(df.columns)
     
-    # 1) New = total unique leads in the current filtered window
-    new_count = int(leads_df["LeadId"].dropna().nunique()) if have(leads_df, ["LeadId"]) else 0
+    # Helper: get status ids by names or by stage
+    def status_ids_by_name(names):
+        if statuses is None: return set()
+        s = statuses.copy()
+        s.columns = s.columns.str.lower()
+        if not {"statusname_e","leadstatusid"}.issubset(s.columns): return set()
+        return set(
+            s.loc[s["statusname_e"].str.lower().isin([n.lower() for n in names]),
+                  "leadstatusid"].astype(int).tolist()
+        )
     
-    # 2) Interested = status "Interested"
-    interested_set = status_ids(["Interested"])
-    interested_count = int(
+    def status_ids_by_stage(stage_no):
+        if statuses is None: return set()
+        s = statuses.copy()
+        s.columns = s.columns.str.lower()
+        if not {"leadstageid","leadstatusid"}.issubset(s.columns): return set()
+        return set(
+            s.loc[s["leadstageid"].astype("Int64")==stage_no, "leadstatusid"].astype(int).tolist()
+        )
+    
+    # Cohort: New = all unique leads in the current filtered window
+    cohort_ids = pd.Index(leads_df["LeadId"].dropna().astype(int).unique()) if have(leads_df, ["LeadId"]) else pd.Index([])
+    new_count  = int(cohort_ids.size)
+    
+    # Qualified = all statuses under LeadStageId=2 (stage “Qualified”)
+    qualified_sid = status_ids_by_stage(2)
+    qualified_ids = pd.Index(
         leads_df.loc[
-            have(leads_df, ["LeadStatusId","LeadId"]) & leads_df["LeadStatusId"].isin(interested_set),
+            have(leads_df, ["LeadStatusId","LeadId"]) & leads_df["LeadStatusId"].isin(qualified_sid),
             "LeadId"
-        ].dropna().nunique()
-    )
+        ].dropna().astype(int).unique()
+    ).intersection(cohort_ids)
+    qualified_count = int(qualified_ids.size)
     
-    # 3) Meeting Scheduled = status "In Discussion" (as per mapping)
-    in_discussion_set = status_ids(["In Discussion"])
-    meeting_sched_count = int(
+    # Meeting Scheduled = AMA scheduled/rescheduled within window (if table is present)
+    meet_ids = pd.Index([])
+    if meetings is not None:
+        m = meetings.copy()
+        m.columns = m.columns.str.lower()
+        if "leadid" in m.columns:
+            # If MeetingStatusId exists, restrict to scheduled-like states; else any meeting row
+            if "meetingstatusid" in m.columns:
+                # If your MeetingStatus master uses 1=Scheduled and 6=Rescheduled, keep as is; otherwise treat any >0 as scheduled
+                scheduled_mask = m["meetingstatusid"].isin({1,6}) if m["meetingstatusid"].notna().any() else m["meetingstatusid"].notna()
+                m = m.loc[scheduled_mask]
+            meet_ids = pd.Index(m["leadid"].dropna().astype(int).unique()).intersection(qualified_ids)
+    meeting_count = int(meet_ids.size)
+    
+    # Negotiation = On Hold + Awaiting Budget
+    neg_sid = status_ids_by_name(["On Hold","Awaiting Budget"])
+    neg_ids = pd.Index(
         leads_df.loc[
-            have(leads_df, ["LeadStatusId","LeadId"]) & leads_df["LeadStatusId"].isin(in_discussion_set),
+            have(leads_df, ["LeadStatusId","LeadId"]) & leads_df["LeadStatusId"].isin(neg_sid),
             "LeadId"
-        ].dropna().nunique()
-    )
+        ].dropna().astype(int).unique()
+    ).intersection(meet_ids)
+    neg_count = int(neg_ids.size)
     
-    # 4) Negotiation = statuses "On Hold" + "Awaiting Budget"
-    neg_set = status_ids(["On Hold","Awaiting Budget"])
-    neg_count = int(
+    # Contract Signed = Won
+    won_sid = status_ids_by_name(["Won"])
+    signed_ids = pd.Index(
         leads_df.loc[
-            have(leads_df, ["LeadStatusId","LeadId"]) & leads_df["LeadStatusId"].isin(neg_set),
+            have(leads_df, ["LeadStatusId","LeadId"]) & leads_df["LeadStatusId"].isin(won_sid),
             "LeadId"
-        ].dropna().nunique()
-    )
+        ].dropna().astype(int).unique()
+    ).intersection(meet_ids)
+    signed_count = int(signed_ids.size)
     
-    # 5) Contract Signed = status "Won"
-    won_set = status_ids(["Won"])
-    signed_count = int(
+    # Lost = Lost
+    lost_sid = status_ids_by_name(["Lost"])
+    lost_ids = pd.Index(
         leads_df.loc[
-            have(leads_df, ["LeadStatusId","LeadId"]) & leads_df["LeadStatusId"].isin(won_set),
+            have(leads_df, ["LeadStatusId","LeadId"]) & leads_df["LeadStatusId"].isin(lost_sid),
             "LeadId"
-        ].dropna().nunique()
-    )
+        ].dropna().astype(int).unique()
+    ).intersection(meet_ids)
+    lost_count = int(lost_ids.size)
     
-    # 6) Lost = status "Lost"
-    lost_set = status_ids(["Lost"])
-    lost_count = int(
-        leads_df.loc[
-            have(leads_df, ["LeadStatusId","LeadId"]) & leads_df["LeadStatusId"].isin(lost_set),
-            "LeadId"
-        ].dropna().nunique()
-    )
-    
-    # Build and render funnel
+    # Assemble funnel (subset logic removes need for artificial capping)
     funnel_df = pd.DataFrame({
-        "Stage": [
-            "New",
-            "Interested",
-            "Meeting Scheduled",
-            "Negotiation",
-            "Contract Signed",
-            "Lost"
-        ],
-        "Count": [new_count, interested_count, meeting_sched_count, neg_count, signed_count, lost_count]
+        "Stage": ["New","Qualified","Meeting Scheduled","Negotiation","Contract Signed","Lost"],
+        "Count": [new_count, qualified_count, meeting_count, neg_count, signed_count, lost_count]
     })
     
     fig_funnel = px.funnel(
@@ -481,8 +496,6 @@ def show_executive_summary(d):
         margin=dict(l=0, r=0, t=10, b=10)
     )
     st.plotly_chart(fig_funnel, use_container_width=True)
-
-
     # Top markets
     st.markdown("---"); st.subheader("Top markets")
     if countries is not None and "CountryId" in leads.columns and "countryname_e" in countries.columns:
