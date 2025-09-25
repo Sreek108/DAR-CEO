@@ -262,55 +262,7 @@ else:
 # -----------------------------------------------------------------------------
 # Executive Summary
 # -----------------------------------------------------------------------------
-def show_executive_summary(d):
-    leads = d.get("leads")
-    lead_statuses = d.get("lead_statuses")
-    meetings = d.get("agent_meeting_assignment")
 
-    if leads is None or len(leads) == 0:
-        st.info("No data available in the selected range.")
-        return
-
-    # Determine 'Won' status id by name if available; fallback to 9
-    won_status_id = 9
-    if lead_statuses is not None and "statusname_e" in lead_statuses.columns:
-        match = lead_statuses.loc[lead_statuses["statusname_e"].str.lower() == "won"]
-        if not match.empty:
-            won_status_id = int(match.iloc[0]["leadstatusid"]) if "leadstatusid" in match.columns else won_status_id
-
-    # Date spans
-    today = pd.Timestamp.today().normalize()
-    week_start = today - pd.Timedelta(days=today.weekday())
-    month_start = today.replace(day=1)
-    year_start = today.replace(month=1, day=1)
-    date_ranges = {
-        "Week to Date": (week_start, today),
-        "Month to Date": (month_start, today),
-        "Year to Date": (year_start, today),
-    }
-
-    st.subheader("Performance KPIs")
-    cols = st.columns(3)
-    for (label, (start, end)), col in zip(date_ranges.items(), cols):
-        leads_period = leads.loc[(leads["CreatedOn"] >= pd.Timestamp(start)) & (leads["CreatedOn"] <= pd.Timestamp(end))] \
-                       if "CreatedOn" in leads.columns else pd.DataFrame()
-        meetings_period = meetings.loc[(meetings["ScheduledDate"] >= pd.Timestamp(start)) & (meetings["ScheduledDate"] <= pd.Timestamp(end))] \
-                          if meetings is not None and "ScheduledDate" in meetings.columns else pd.DataFrame()
-
-        total_leads = len(leads_period)
-        won_mask = leads_period["LeadStatusId"] == won_status_id if "LeadStatusId" in leads_period.columns else pd.Series(False, index=leads_period.index)
-        won_leads = int(won_mask.sum())
-        conversion_rate = (won_leads / total_leads * 100) if total_leads else 0.0
-        meetings_scheduled = meetings_period["leadid"].nunique() if "leadid" in meetings_period.columns else 0
-
-        with col:
-            st.markdown(f"#### {label}")
-            st.markdown(f"**Total Leads**")
-            st.markdown(f"<span style='font-size:2rem;'>{total_leads}</span>", unsafe_allow_html=True)
-            st.markdown(f"**Conversion Rate**")
-            st.markdown(f"<span style='font-size:2rem;'>{conversion_rate:.1f}%</span>", unsafe_allow_html=True)
-            st.markdown(f"**Meetings Scheduled**")
-            st.markdown(f"<span style='font-size:2rem;'>{meetings_scheduled}</span>", unsafe_allow_html=True)
 
     # Trend tiles (indexed)
     st.markdown("---"); st.subheader("Trend at a glance")
