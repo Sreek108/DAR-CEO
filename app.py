@@ -265,6 +265,7 @@ else:
 def show_executive_summary(d):
     leads=d.get("leads"); agents=d.get("agents"); calls=d.get("calls")
     lead_statuses=d.get("lead_statuses"); countries=d.get("countries")
+    meetings = d.get("agent_meeting_assignment")  # For meetings scheduled
 
     if leads is None or len(leads)==0:
         st.info("No data available in the selected range."); return
@@ -275,6 +276,45 @@ def show_executive_summary(d):
         match = lead_statuses.loc[lead_statuses["statusname_e"].str.lower()=="won"]
         if not match.empty: won_status_id = int(match.iloc[0]["leadstatusid"]) if "leadstatusid" in match.columns else won_status_id
 
+    # Helper function to filter dataframe by date range
+    def filter_by_period(df, date_col, start_date, end_date):
+        if df is None or date_col not in df.columns:
+            return pd.DataFrame()
+        mask = (df[date_col] >= pd.Timestamp(start_date)) & (df[date_col] <= pd.Timestamp(end_date))
+        return df.loc[mask]
+
+    today = pd.Timestamp.today().normalize()
+
+    # Define date ranges for Week, Month, Year to date
+    week_start = (today - pd.Timedelta(days=today.weekday()))  # Monday of current week
+    month_start = today.replace(day=1)
+    year_start = today.replace(month=1, day=1)
+    date_ranges = {
+        "Week to Date": (week_start, today),
+        "Month to Date": (month_start, today),
+        "Year to Date": (year_start, today),
+    }
+
+    # Performance KPIs section with 3 subsections side by side
+    st.subheader("Performance KPIs")
+    cols = st.columns(3)
+    for (label, (start, end)), col in zip(date_ranges.items(), cols):
+        leads_period = filter_by_period(leads, "CreatedOn", start, end)
+        meetings_period = filter_by_period(meetings, "ScheduledDate", start, end) if meetings is not None else pd.DataFrame()
+
+        total_leads = len(leads_period)
+        won_mask = leads_period["LeadStatusId"] == won_status_id if "LeadStatusId" in leads_period.columns else pd.Series(False, index=leads_period.index)
+        won_leads = int(won_mask.sum())
+        conversion_rate = (won_leads / total_leads * 100) if total_leads else 0.0
+        meetings_scheduled = meetings_period["leadid"].nunique() if "leadid" in meetings_period.columns else 0
+
+        with col:
+            st.markdown(f"### {label}")
+            st.metric("Total Leads", format_number(total_leads))
+            st.metric("Conversion Rate", f"{conversion_rate:.1f}%")
+            st.metric("Meetings Scheduled", format_number(meetings_scheduled))
+
+    # Existing executive summary cards (unchanged and below the KPIs)
     total_leads = len(leads)
     won_mask = leads["LeadStatusId"].eq(won_status_id) if "LeadStatusId" in leads.columns else pd.Series(False, index=leads.index)
     won_leads = int(won_mask.sum())
@@ -291,6 +331,7 @@ def show_executive_summary(d):
     assigned_leads = int(leads["AssignedAgentId"].notna().sum()) if "AssignedAgentId" in leads.columns else 0
     agent_utilization = (assigned_leads/active_agents) if active_agents else 0.0
 
+    st.markdown("---")
     st.subheader("🎯 Executive Summary")
     c1,c2,c3,c4 = st.columns(4)
     with c1: st.metric("Total Leads", format_number(total_leads))
