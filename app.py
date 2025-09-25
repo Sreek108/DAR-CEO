@@ -231,16 +231,6 @@ def filter_by_date(datasets, grain_sel: str):
         out["transactions"]=out["transactions"].loc[mask].copy()
         out["transactions"]["period"]=add_period(dt.loc[mask])
 
-    # AgentMeetingAssignment (apply window to meetings as well)
-    if out.get("agent_meeting_assignment") is not None:
-        ama = out["agent_meeting_assignment"].copy()
-        cols_lower = {c.lower(): c for c in ama.columns}
-        if "startdatetime" in cols_lower:
-            dtcol = cols_lower["startdatetime"]
-            dt = pd.to_datetime(ama[dtcol], errors="coerce")
-            mask = dt.dt.date.between(date_start, date_end)
-            out["agent_meeting_assignment"] = ama.loc[mask].copy()
-
     return out
 
 fdata = filter_by_date(data, grain)
@@ -265,7 +255,6 @@ else:
 def show_executive_summary(d):
     leads=d.get("leads"); agents=d.get("agents"); calls=d.get("calls")
     lead_statuses=d.get("lead_statuses"); countries=d.get("countries")
-    meetings=d.get("agent_meeting_assignment"); schedules=d.get("schedules")
 
     if leads is None or len(leads)==0:
         st.info("No data available in the selected range."); return
@@ -400,82 +389,65 @@ def show_executive_summary(d):
         with s3: st.plotly_chart(tile_bullet(rev_ts,"Revenue index",EXEC_GREEN), use_container_width=True)
         with s4: st.plotly_chart(tile_bullet(calls_ts,"Call success index","#7dd3fc"), use_container_width=True)
 
-    # --- Lead conversion snapshot (strict lifecycle, cohort-based) ---
+    # --- Lead conversion snapshot (status bars like Screenshot‑169) ---
     st.markdown("---")
     st.subheader("Lead conversion snapshot")
 
     statuses = d.get("lead_statuses")
+    leads_df = leads.copy()
 
-    def status_ids(names):
-        if statuses is None or "statusname_e" not in statuses.columns:
-            return set()
-        col_id = "leadstatusid" if "leadstatusid" in statuses.columns else statuses.columns[0]
-        return set(
-            statuses.loc[statuses["statusname_e"].str.lower().isin([n.lower() for n in names]), col_id]
-            .astype(int).tolist()
+    desired_order = [
+        "Uncontacted",
+        "Attempted Contact",
+        "Interested",
+        "Not Interested",
+        "Follow-up Needed",
+        "In Discussion",
+        "On Hold",
+        "Awaiting Budget",
+        "Won",
+        "Lost",
+    ]
+
+    # Build id->label map
+    status_map = {}
+    if statuses is not None:
+        s = statuses.copy()
+        s.columns = s.columns.str.lower()
+        if {"leadstatusid","statusname_e"}.issubset(s.columns):
+            status_map = dict(zip(s["leadstatusid"].astype(int), s["statusname_e"].astype(str)))
+
+    # Count leads by status in the filtered window
+    if "LeadStatusId" in leads_df.columns:
+        cnt = (
+            leads_df["LeadStatusId"].dropna().astype(int)
+            .value_counts()
+            .rename_axis("LeadStatusId")
+            .reset_index(name="Count")
         )
-
-    def have(df, cols): return (df is not None) and set(cols).issubset(df.columns)
-
-    # Cohort = ALL unique leads in the filtered window (top of funnel)
-    cohort_ids = pd.Index(leads["LeadId"].dropna().astype(int).unique()) if have(leads, ["LeadId"]) else pd.Index([])
-
-    # 1) New
-    new_ids = cohort_ids.copy()
-
-    # 2) Qualified = Interested ONLY (requested definition)
-    interested = status_ids(["Interested"])
-    qual_ids = pd.Index(
-        leads.loc[
-            have(leads, ["LeadStatusId","LeadId"]) & leads["LeadStatusId"].isin(interested),
-            "LeadId"
-        ].dropna().astype(int).unique()
-    ).intersection(new_ids)
-
-    # 3) Follow-up = has LeadSchedule row (subset of Qualified)
-    if have(schedules, ["LeadId"]):
-        followup_ids = pd.Index(schedules["LeadId"].dropna().astype(int).unique()).intersection(qual_ids)
     else:
-        followup_ids = pd.Index([])
+        cnt = pd.DataFrame(columns=["LeadStatusId","Count"])
 
-    # 4) Meeting Scheduled = AMA Scheduled/Rescheduled (subset of Follow-up)
-    meet_ids = pd.Index([])
-    if meetings is not None:
-        m = meetings.copy(); m.columns = m.columns.str.lower()
-        if {"leadid","meetingstatusid"}.issubset(m.columns):
-            meet_ids = pd.Index(
-                m.loc[m["meetingstatusid"].isin({1,6}), "leadid"].dropna().astype(int).unique()
-            ).intersection(followup_ids)
+    cnt["Status"] = cnt["LeadStatusId"].map(status_map).fillna("Unknown")
 
-    # 5) Contract Signed = Won (subset of Meeting)
-    won = status_ids(["Won"])
-    signed_ids = pd.Index(
-        leads.loc[
-            have(leads, ["LeadStatusId","LeadId"]) & leads["LeadStatusId"].isin(won),
-            "LeadId"
-        ].dropna().astype(int).unique()
-    ).intersection(meet_ids)
+    # Reindex to desired order and fill zeros for missing statuses
+    order_df = pd.DataFrame({"Status": desired_order})
+    viz_df = order_df.merge(cnt[["Status","Count"]], on="Status", how="left").fillna({"Count": 0})
+    viz_df["Count"] = viz_df["Count"].astype(int)
 
-    # 6) Lost = Lost (subset of Meeting)
-    lost = status_ids(["Lost"])
-    lost_ids_final = pd.Index(
-        leads.loc[
-            have(leads, ["LeadStatusId","LeadId"]) & leads["LeadStatusId"].isin(lost),
-            "LeadId"
-        ].dropna().astype(int).unique()
-    ).intersection(meet_ids)
-
-    stages = ["New","Qualified","Follow-up","Meeting Scheduled","Contract Signed","Lost"]
-    counts = [new_ids.size, qual_ids.size, followup_ids.size, meet_ids.size, signed_ids.size, lost_ids_final.size]
-    funnel_df = pd.DataFrame({"Stage": stages, "Count": counts})
-
-    fig_funnel = px.funnel(
-        funnel_df, x="Count", y="Stage",
-        color_discrete_sequence=[EXEC_BLUE, EXEC_GREEN, EXEC_PRIMARY, "#FFA500", "#7CFC00", EXEC_DANGER]
+    fig = px.bar(
+        viz_df, x="Count", y="Status", orientation="h", text="Count",
+        color_discrete_sequence=[EXEC_BLUE],
     )
-    fig_funnel.update_layout(height=340, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                             font_color="white", margin=dict(l=0, r=0, t=10, b=10))
-    st.plotly_chart(fig_funnel, use_container_width=True)
+    fig.update_layout(
+        height=420,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        font_color="white",
+        margin=dict(l=0, r=10, t=10, b=10),
+    )
+    fig.update_traces(textposition="outside", cliponaxis=False)
+    st.plotly_chart(fig, use_container_width=True)
 
     # Top markets
     st.markdown("---"); st.subheader("Top markets")
