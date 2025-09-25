@@ -1,2 +1,0 @@
-ScheduleId,LeadId,TaskTypeId,ScheduleTitle,ScheduledDate,AssignedAgentId,IsFollowUp,AgreedNextStep,CreatedBy,CreatedOn
-1,2,1,Follow-up Call - September 2nd,2025-09-02 14:00:00,1,1,Follow up on September 2nd,SYSTEM,2025-09-23 08:57:56

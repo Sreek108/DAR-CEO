@@ -1,3 +1,0 @@
-LeadCallId,LeadId,CallId,CallDateTime,DurationSeconds,CallStatusId,ProjectDiscussed,LeadScoringResult,CallSummary,CreatedBy,CreatedOn
-1,1,cmey7b8mo0001jv04jmlo8vml,2025-08-30 11:51:34,160,1,Lamborghini villas and Trump Tower,WARM(12-16),Broker interested in luxury properties like Lamborghini and Trump Tower. Requested detailed email and agreed to potential Zoom call.,SYSTEM,2025-09-23 08:57:56
-2,2,CALL002,2025-09-09 15:00:00,0,2,,,No answer - will try again later,SYSTEM,2025-09-23 08:57:56

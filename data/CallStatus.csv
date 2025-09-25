@@ -1,6 +1,0 @@
-CallStatusId,StatusName_E,StatusName_A,IsActive,CreatedBy,CreatedOn
-1,Connected,متصل,1,SYSTEM,2025-09-23 08:57:56
-2,No Answer,لا يجيب,1,SYSTEM,2025-09-23 08:57:56
-3,Busy Signal,خط مشغول,1,SYSTEM,2025-09-23 08:57:56
-4,Failed,فاشل,1,SYSTEM,2025-09-23 08:57:56
-5,Declined,مرفوض,1,SYSTEM,2025-09-23 08:57:56

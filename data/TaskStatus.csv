@@ -1,6 +1,0 @@
-TaskStatusId,StatusName_E,StatusName_A,IsActive,CreatedBy,CreatedOn
-1,Pending,معلق,1,SYSTEM,2025-09-23 08:57:56
-2,In Progress,قيد التقدم,1,SYSTEM,2025-09-23 08:57:56
-3,Completed,مكتمل,1,SYSTEM,2025-09-23 08:57:56
-4,Cancelled,ملغي,1,SYSTEM,2025-09-23 08:57:56
-5,Overdue,متأخر,1,SYSTEM,2025-09-23 08:57:56

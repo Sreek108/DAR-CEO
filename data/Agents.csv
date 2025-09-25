@@ -1,4 +1,0 @@
-AgentId,AgentCode,FirstName,LastName,Email,Phone,Role,CountryId,CityRegionId,IsActive,CreatedBy,CreatedOn
-1,AGENT001,Jasmin,Ahmed,jasmin@darglobal.com,+971501234567,AI Agent,2,3,1,SYSTEM,2025-09-23 08:57:56
-2,AGENT002,Mohammed,Ali,mohammed@darglobal.com,+966501234567,Senior Closer,1,1,1,SYSTEM,2025-09-23 08:57:56
-3,AGENT003,Sarah,Johnson,sarah@darglobal.com,+971501234568,Lead Nurture Specialist,2,3,1,SYSTEM,2025-09-23 08:57:56
