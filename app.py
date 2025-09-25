@@ -148,6 +148,16 @@ def load_data(data_dir="data"):
         if "TransactionDate" in df.columns: df["TransactionDate"]=pd.to_datetime(df["TransactionDate"], errors="coerce")
         ds["transactions"]=df
 
+    # AgentMeetingAssignment — align StartDateTime to the selected window
+    if out.get("agent_meeting_assignment") is not None:
+        ama = out["agent_meeting_assignment"].copy()
+        cols_lower = {c.lower(): c for c in ama.columns}
+        if "startdatetime" in cols_lower:
+            dtcol = cols_lower["startdatetime"]
+            dt = pd.to_datetime(ama[dtcol], errors="coerce")
+            mask = dt.dt.date.between(date_start, date_end)
+            out["agent_meeting_assignment"] = ama.loc[mask].copy()
+
     for lk in ["countries","lead_stages","lead_statuses","lead_sources","lead_scoring","call_statuses","sentiments","task_types","task_statuses","city_region","timezone_info","priority","meeting_status","agent_meeting_assignment"]:
         if ds.get(lk) is not None: ds[lk]=norm(ds[lk])
 
