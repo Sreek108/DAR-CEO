@@ -332,36 +332,6 @@ def show_executive_summary(d):
     agent_utilization = (assigned_leads/active_agents) if active_agents else 0.0
 
     st.markdown("---")
-    st.subheader("🎯 Executive Summary")
-    c1,c2,c3,c4 = st.columns(4)
-    with c1: st.metric("Total Leads", format_number(total_leads))
-    with c2: st.metric("Active Pipeline", format_currency(active_pipeline))
-    with c3: st.metric("Revenue (Won)", format_currency(won_revenue))
-    with c4: st.metric("Conversion Rate", f"{conversion_rate:.1f}%")
-
-    c1,c2,c3,c4 = st.columns(4)
-    with c1: st.metric("Call Success Rate", f"{call_success_rate:.1f}%")
-    with c2: st.metric("Active Agents", format_number(active_agents))
-    with c3: st.metric("Agent Utilization", f"{agent_utilization:.1f} leads/agent")
-    with c4:
-        try:
-            spend_path=os.path.join("data","marketing_spend.csv")
-            if os.path.exists(spend_path):
-                spend=pd.read_csv(spend_path)
-                date_col="Date" if "Date" in spend.columns else ("SpendDate" if "SpendDate" in spend.columns else None)
-                if date_col:
-                    spend[date_col]=pd.to_datetime(spend[date_col], errors="coerce")
-                    pmin = pd.to_datetime(leads["CreatedOn"], errors="coerce").min()
-                    pmax = pd.to_datetime(leads["CreatedOn"], errors="coerce").max()
-                    m=spend[date_col].between(pmin,pmax)
-                    m_spend=float(spend.loc[m,"SpendUSD"].sum()) if "SpendUSD" in spend.columns else None
-                else: m_spend=None
-                roi = ((won_revenue - m_spend)/m_spend*100.0) if (m_spend and m_spend>0) else None
-                st.metric("ROI", f"{roi:,.1f}%" if roi is not None else "—")
-            else:
-                st.metric("ROI", "—")
-        except:
-            st.metric("ROI", "—")
 
     # Trend tiles (indexed)
     st.markdown("---"); st.subheader("Trend at a glance")
