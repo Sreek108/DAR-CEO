@@ -263,55 +263,67 @@ else:
 # Executive Summary
 # -----------------------------------------------------------------------------
 def show_executive_summary(d):
-    leads = d.get("leads")
-    lead_statuses = d.get("lead_statuses")
-    meetings = d.get("agent_meeting_assignment")
+    leads=d.get("leads"); agents=d.get("agents"); calls=d.get("calls")
+    lead_statuses=d.get("lead_statuses"); countries=d.get("countries")
 
-    if leads is None or len(leads) == 0:
-        st.info("No data available in the selected range.")
-        return
+    if leads is None or len(leads)==0:
+        st.info("No data available in the selected range."); return
 
+    # 'Won' status id
     won_status_id = 9
     if lead_statuses is not None and "statusname_e" in lead_statuses.columns:
-        match = lead_statuses.loc[lead_statuses["statusname_e"].str.lower() == "won"]
-        if not match.empty:
-            won_status_id = int(match.iloc[0]["leadstatusid"]) if "leadstatusid" in match.columns else won_status_id
+        match = lead_statuses.loc[lead_statuses["statusname_e"].str.lower()=="won"]
+        if not match.empty and "leadstatusid" in match.columns:
+            won_status_id = int(match.iloc[0]["leadstatusid"])
 
-    today = pd.Timestamp.today().normalize()
-    week_start = today - pd.Timedelta(days=today.weekday())
-    month_start = today.replace(day=1)
-    year_start = today.replace(month=1, day=1)
-    date_ranges = {
-        "Week to Date": (week_start, today),
-        "Month to Date": (month_start, today),
-        "Year to Date": (year_start, today),
-    }
+    total_leads = len(leads)
+    won_mask = leads["LeadStatusId"].eq(won_status_id) if "LeadStatusId" in leads.columns else pd.Series(False, index=leads.index)
+    won_leads = int(won_mask.sum())
+    conversion_rate = (won_leads/total_leads*100) if total_leads else 0.0
 
-    st.subheader("Performance KPIs")
-    cols = st.columns(3)
-    for (label, (start, end)), col in zip(date_ranges.items(), cols):
-        leads_period = leads.loc[(leads["CreatedOn"] >= pd.Timestamp(start)) & (leads["CreatedOn"] <= pd.Timestamp(end))] \
-            if "CreatedOn" in leads.columns else pd.DataFrame()
-        meetings_period = meetings.loc[(meetings["ScheduledDate"] >= pd.Timestamp(start)) & (meetings["ScheduledDate"] <= pd.Timestamp(end))] \
-            if meetings is not None and "ScheduledDate" in meetings.columns else pd.DataFrame()
+    active_pipeline = leads["EstimatedBudget"].sum() if "EstimatedBudget" in leads.columns else 0.0
+    won_revenue = leads.loc[won_mask, "EstimatedBudget"].sum() if ("EstimatedBudget" in leads.columns) else 0.0
 
-        total_leads = len(leads_period)
-        won_mask = leads_period["LeadStatusId"] == won_status_id if "LeadStatusId" in leads_period.columns else pd.Series(False, index=leads_period.index)
-        won_leads = int(won_mask.sum())
-        conversion_rate = (won_leads / total_leads * 100) if total_leads else 0.0
-        meetings_scheduled = meetings_period["leadid"].nunique() if "leadid" in meetings_period.columns else 0
+    total_calls = len(calls) if calls is not None else 0
+    connected_calls = int((calls["CallStatusId"]==1).sum()) if (calls is not None and "CallStatusId" in calls.columns) else 0
+    call_success_rate = (connected_calls/total_calls*100) if total_calls else 0.0
 
-        with col:
-            st.markdown(f"#### {label}")
-            st.markdown(f"**Total Leads**")
-            st.markdown(f"<span style='font-size:2rem;'>{total_leads}</span>", unsafe_allow_html=True)
-            st.markdown(f"**Conversion Rate**")
-            st.markdown(f"<span style='font-size:2rem;'>{conversion_rate:.1f}%</span>", unsafe_allow_html=True)
-            st.markdown(f"**Meetings Scheduled**")
-            st.markdown(f"<span style='font-size:2rem;'>{meetings_scheduled}</span>", unsafe_allow_html=True)
+    active_agents = int(agents[agents["IsActive"]==1].shape[0]) if (agents is not None and "IsActive" in agents.columns) else (len(agents) if agents is not None else 0)
+    assigned_leads = int(leads["AssignedAgentId"].notna().sum()) if "AssignedAgentId" in leads.columns else 0
+    agent_utilization = (assigned_leads/active_agents) if active_agents else 0.0
 
+    st.subheader("🎯 Executive Summary")
+    c1,c2,c3,c4 = st.columns(4)
+    with c1: st.metric("Total Leads", format_number(total_leads))
+    with c2: st.metric("Active Pipeline", format_currency(active_pipeline))
+    with c3: st.metric("Revenue (Won)", format_currency(won_revenue))
+    with c4: st.metric("Conversion Rate", f"{conversion_rate:.1f}%")
 
-    # Trend tiles (indexed)
+    c1,c2,c3,c4 = st.columns(4)
+    with c1: st.metric("Call Success Rate", f"{call_success_rate:.1f}%")
+    with c2: st.metric("Active Agents", format_number(active_agents))
+    with c3: st.metric("Agent Utilization", f"{agent_utilization:.1f} leads/agent")
+    with c4:
+        try:
+            spend_path=os.path.join("data","marketing_spend.csv")
+            if os.path.exists(spend_path):
+                spend=pd.read_csv(spend_path)
+                date_col="Date" if "Date" in spend.columns else ("SpendDate" if "SpendDate" in spend.columns else None)
+                if date_col:
+                    spend[date_col]=pd.to_datetime(spend[date_col], errors="coerce")
+                    pmin = pd.to_datetime(leads["CreatedOn"], errors="coerce").min()
+                    pmax = pd.to_datetime(leads["CreatedOn"], errors="coerce").max()
+                    m=spend[date_col].between(pmin,pmax)
+                    m_spend=float(spend.loc[m,"SpendUSD"].sum()) if "SpendUSD" in spend.columns else None
+                else: m_spend=None
+                roi = ((won_revenue - m_spend)/m_spend*100.0) if (m_spend and m_spend>0) else None
+                st.metric("ROI", f"{roi:,.1f}%" if roi is not None else "—")
+            else:
+                st.metric("ROI", "—")
+        except:
+            st.metric("ROI", "—")
+
+    # Trend tiles (indexed): Leads, Conversion Rate, Meeting Scheduled
     st.markdown("---"); st.subheader("Trend at a glance")
     trend_style = st.radio("Trend style", ["Line","Bars","Bullet"], index=0, horizontal=True, key="__trend_style_exec")
 
@@ -319,21 +331,35 @@ def show_executive_summary(d):
         dt=pd.to_datetime(leads.get("CreatedOn"), errors="coerce")
         leads=leads.copy(); leads["period"]=dt.dt.to_period("M").apply(lambda p: p.start_time.date())
 
+    # 1) Leads by period
     leads_ts = leads.groupby("period").size().reset_index(name="value")
-    pipeline_ts = leads.groupby("period")["EstimatedBudget"].sum().reset_index(name="value") if "EstimatedBudget" in leads.columns else pd.DataFrame({"period":[], "value":[]})
 
-    # IMPORTANT: rebuild boolean mask against the current leads index before boolean indexing
-    rev_mask = leads["LeadStatusId"].eq(won_status_id) if "LeadStatusId" in leads.columns else pd.Series(False, index=leads.index)
-    rev_mask = rev_mask.reindex(leads.index, fill_value=False)
-    rev_ts = leads.loc[rev_mask].groupby("period")["EstimatedBudget"].sum().reset_index(name="value") if "EstimatedBudget" in leads.columns else pd.DataFrame({"period":[], "value":[]})
-
-    if calls is not None and len(calls)>0 and "CallDateTime" in calls.columns:
-        c=calls.copy(); c["period"]=pd.to_datetime(c["CallDateTime"], errors="coerce").dt.to_period("W").apply(lambda p: p.start_time.date())
-        calls_ts=c.groupby("period").agg(total=("LeadCallId","count"), connected=("CallStatusId", lambda x: (x==1).sum())).reset_index()
-        calls_ts["value"]=(calls_ts["connected"]/calls_ts["total"]*100).round(1)
+    # 2) Conversion rate by period = Won / Leads per period (%)
+    if "LeadStatusId" in leads.columns:
+        per_leads = leads.groupby("period").size().rename("total")
+        per_won = leads.loc[leads["LeadStatusId"].eq(won_status_id)] \
+                       .groupby("period").size().rename("won")
+        conv_ts = pd.concat([per_leads, per_won], axis=1).fillna(0.0).reset_index()
+        conv_ts["value"] = (conv_ts["won"]/conv_ts["total"]*100).round(1)
     else:
-        calls_ts=pd.DataFrame({"period":[], "value":[]})
+        conv_ts = pd.DataFrame({"period":[], "value":[]})
 
+    # 3) Meeting Scheduled by period from AgentMeetingAssignment
+    meetings = d.get("agent_meeting_assignment")
+    if meetings is not None and len(meetings)>0:
+        m = meetings.copy(); m.columns = m.columns.str.lower()
+        date_col = "startdatetime" if "startdatetime" in m.columns else None
+        if date_col is not None:
+            m["_period"] = pd.to_datetime(m[date_col], errors="coerce").dt.to_period("W").apply(lambda p: p.start_time.date())
+            if "meetingstatusid" in m.columns:
+                m = m[m["meetingstatusid"].isin({1,6})]  # Scheduled/Rescheduled
+            meet_ts = m.groupby("_period").size().reset_index(name="value").rename(columns={"_period":"period"})
+        else:
+            meet_ts = pd.DataFrame({"period":[], "value":[]})
+    else:
+        meet_ts = pd.DataFrame({"period":[], "value":[]})
+
+    # Index-normalize all three for the tiles
     def _index(df):
         df=df.copy()
         if df.empty: df["idx"]=[]; return df
@@ -341,7 +367,9 @@ def show_executive_summary(d):
         df["idx"]=(df["value"]/base)*100.0
         return df
 
-    leads_ts=_index(leads_ts); pipeline_ts=_index(pipeline_ts); rev_ts=_index(rev_ts); calls_ts=_index(calls_ts)
+    leads_ts = _index(leads_ts)
+    conv_ts  = _index(conv_ts)
+    meet_ts  = _index(meet_ts)
 
     def _apply_axes(fig, ys, title):
         ymin=float(pd.Series(ys).min()) if len(ys) else 0
@@ -375,22 +403,19 @@ def show_executive_summary(d):
         fig.update_layout(height=120, margin=dict(l=8,r=8,t=26,b=8), paper_bgcolor="rgba(0,0,0,0)", font_color="white")
         return fig
 
-    s1,s2,s3,s4 = st.columns(4)
+    s1,s2,s3 = st.columns(3)
     if trend_style=="Line":
         with s1: st.plotly_chart(tile_line(leads_ts,EXEC_BLUE,"Leads trend (indexed)"), use_container_width=True)
-        with s2: st.plotly_chart(tile_line(pipeline_ts,EXEC_PRIMARY,"Pipeline trend (indexed)"), use_container_width=True)
-        with s3: st.plotly_chart(tile_line(rev_ts,EXEC_GREEN,"Revenue trend (indexed)"), use_container_width=True)
-        with s4: st.plotly_chart(tile_line(calls_ts,"#7dd3fc","Call success trend (indexed)"), use_container_width=True)
+        with s2: st.plotly_chart(tile_line(conv_ts,EXEC_GREEN,"Conversion rate (indexed)"), use_container_width=True)
+        with s3: st.plotly_chart(tile_line(meet_ts,EXEC_PRIMARY,"Meeting scheduled (indexed)"), use_container_width=True)
     elif trend_style=="Bars":
         with s1: st.plotly_chart(tile_bar(leads_ts,EXEC_BLUE,"Leads trend (indexed)"), use_container_width=True)
-        with s2: st.plotly_chart(tile_bar(pipeline_ts,EXEC_PRIMARY,"Pipeline trend (indexed)"), use_container_width=True)
-        with s3: st.plotly_chart(tile_bar(rev_ts,EXEC_GREEN,"Revenue trend (indexed)"), use_container_width=True)
-        with s4: st.plotly_chart(tile_bar(calls_ts,"#7dd3fc","Call success trend (indexed)"), use_container_width=True)
+        with s2: st.plotly_chart(tile_bar(conv_ts,EXEC_GREEN,"Conversion rate (indexed)"), use_container_width=True)
+        with s3: st.plotly_chart(tile_bar(meet_ts,EXEC_PRIMARY,"Meeting scheduled (indexed)"), use_container_width=True)
     else:
         with s1: st.plotly_chart(tile_bullet(leads_ts,"Leads index",EXEC_BLUE), use_container_width=True)
-        with s2: st.plotly_chart(tile_bullet(pipeline_ts,"Pipeline index",EXEC_PRIMARY), use_container_width=True)
-        with s3: st.plotly_chart(tile_bullet(rev_ts,"Revenue index",EXEC_GREEN), use_container_width=True)
-        with s4: st.plotly_chart(tile_bullet(calls_ts,"Call success index","#7dd3fc"), use_container_width=True)
+        with s2: st.plotly_chart(tile_bullet(conv_ts,"Conversion index",EXEC_GREEN), use_container_width=True)
+        with s3: st.plotly_chart(tile_bullet(meet_ts,"Meetings index",EXEC_PRIMARY), use_container_width=True)
 
     # --- Lead conversion snapshot (New→Qualified→Meeting→Negotiation→Signed→Lost) ---
     st.markdown("---")
