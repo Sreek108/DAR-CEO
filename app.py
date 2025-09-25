@@ -314,23 +314,6 @@ def show_executive_summary(d):
             st.metric("Conversion Rate", f"{conversion_rate:.1f}%")
             st.metric("Meetings Scheduled", format_number(meetings_scheduled))
 
-    # Existing executive summary cards (unchanged and below the KPIs)
-    total_leads = len(leads)
-    won_mask = leads["LeadStatusId"].eq(won_status_id) if "LeadStatusId" in leads.columns else pd.Series(False, index=leads.index)
-    won_leads = int(won_mask.sum())
-    conversion_rate = (won_leads/total_leads*100) if total_leads else 0.0
-
-    active_pipeline = leads["EstimatedBudget"].sum() if "EstimatedBudget" in leads.columns else 0.0
-    won_revenue = leads.loc[won_mask, "EstimatedBudget"].sum() if ("EstimatedBudget" in leads.columns) else 0.0
-
-    total_calls = len(calls) if calls is not None else 0
-    connected_calls = int((calls["CallStatusId"]==1).sum()) if (calls is not None and "CallStatusId" in calls.columns) else 0
-    call_success_rate = (connected_calls/total_calls*100) if total_calls else 0.0
-
-    active_agents = int(agents[agents["IsActive"]==1].shape[0]) if (agents is not None and "IsActive" in agents.columns) else (len(agents) if agents is not None else 0)
-    assigned_leads = int(leads["AssignedAgentId"].notna().sum()) if "AssignedAgentId" in leads.columns else 0
-    agent_utilization = (assigned_leads/active_agents) if active_agents else 0.0
-
     # Trend tiles (indexed)
     st.markdown("---"); st.subheader("Trend at a glance")
     trend_style = st.radio("Trend style", ["Line","Bars","Bullet"], index=0, horizontal=True, key="__trend_style_exec")
