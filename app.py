@@ -231,6 +231,16 @@ def filter_by_date(datasets, grain_sel: str):
         out["transactions"]=out["transactions"].loc[mask].copy()
         out["transactions"]["period"]=add_period(dt.loc[mask])
 
+    # AgentMeetingAssignment — align to the same window using StartDateTime
+    if out.get("agent_meeting_assignment") is not None:
+        ama = out["agent_meeting_assignment"].copy()
+        cols_lower = {c.lower(): c for c in ama.columns}
+        if "startdatetime" in cols_lower:
+            dtcol = cols_lower["startdatetime"]
+            dt = pd.to_datetime(ama[dtcol], errors="coerce")
+            mask = dt.dt.date.between(date_start, date_end)
+            out["agent_meeting_assignment"] = ama.loc[mask].copy()
+
     return out
 
 fdata = filter_by_date(data, grain)
@@ -255,6 +265,7 @@ else:
 def show_executive_summary(d):
     leads=d.get("leads"); agents=d.get("agents"); calls=d.get("calls")
     lead_statuses=d.get("lead_statuses"); countries=d.get("countries")
+    meetings=d.get("agent_meeting_assignment")
 
     if leads is None or len(leads)==0:
         st.info("No data available in the selected range."); return
@@ -389,17 +400,17 @@ def show_executive_summary(d):
         with s3: st.plotly_chart(tile_bullet(rev_ts,"Revenue index",EXEC_GREEN), use_container_width=True)
         with s4: st.plotly_chart(tile_bullet(calls_ts,"Call success index","#7dd3fc"), use_container_width=True)
 
-   # --- Lead conversion snapshot  ---
+    # --- Lead conversion snapshot (New→Qualified→Meeting→Negotiation→Signed→Lost) ---
     st.markdown("---")
     st.subheader("Lead conversion snapshot")
 
     leads_df   = d.get("leads").copy()
     statuses   = d.get("lead_statuses")
     meetings   = d.get("agent_meeting_assignment")
-    
+
     def have(df, cols): 
         return (df is not None) and set(cols).issubset(df.columns)
-    
+
     # Helper: get status ids by names or by stage
     def status_ids_by_name(names):
         if statuses is None: return set()
@@ -410,7 +421,7 @@ def show_executive_summary(d):
             s.loc[s["statusname_e"].str.lower().isin([n.lower() for n in names]),
                   "leadstatusid"].astype(int).tolist()
         )
-    
+
     def status_ids_by_stage(stage_no):
         if statuses is None: return set()
         s = statuses.copy()
@@ -419,12 +430,12 @@ def show_executive_summary(d):
         return set(
             s.loc[s["leadstageid"].astype("Int64")==stage_no, "leadstatusid"].astype(int).tolist()
         )
-    
-    # Cohort: New = all unique leads in the current filtered window
+
+    # 0) Cohort: New = all unique leads in the current filtered window
     cohort_ids = pd.Index(leads_df["LeadId"].dropna().astype(int).unique()) if have(leads_df, ["LeadId"]) else pd.Index([])
     new_count  = int(cohort_ids.size)
-    
-    # Qualified = all statuses under LeadStageId=2 (stage “Qualified”)
+
+    # 1) Qualified = all statuses under LeadStageId=2 (stage “Qualified”)
     qualified_sid = status_ids_by_stage(2)
     qualified_ids = pd.Index(
         leads_df.loc[
@@ -433,22 +444,18 @@ def show_executive_summary(d):
         ].dropna().astype(int).unique()
     ).intersection(cohort_ids)
     qualified_count = int(qualified_ids.size)
-    
-    # Meeting Scheduled = AMA scheduled/rescheduled within window (if table is present)
+
+    # 2) Meeting Scheduled = AMA scheduled/rescheduled (filter aligned in filter_by_date)
     meet_ids = pd.Index([])
     if meetings is not None:
-        m = meetings.copy()
-        m.columns = m.columns.str.lower()
-        if "leadid" in m.columns:
-            # If MeetingStatusId exists, restrict to scheduled-like states; else any meeting row
-            if "meetingstatusid" in m.columns:
-                # If your MeetingStatus master uses 1=Scheduled and 6=Rescheduled, keep as is; otherwise treat any >0 as scheduled
-                scheduled_mask = m["meetingstatusid"].isin({1,6}) if m["meetingstatusid"].notna().any() else m["meetingstatusid"].notna()
-                m = m.loc[scheduled_mask]
-            meet_ids = pd.Index(m["leadid"].dropna().astype(int).unique()).intersection(qualified_ids)
+        m = meetings.copy(); m.columns = m.columns.str.lower()
+        if {"leadid","meetingstatusid"}.issubset(m.columns):
+            m = m[m["leadid"].isin(qualified_ids)]
+            m = m[m["meetingstatusid"].isin({1,6})]  # 1=Scheduled, 6=Rescheduled (adjust if your master differs)
+            meet_ids = pd.Index(m["leadid"].dropna().astype(int).unique())
     meeting_count = int(meet_ids.size)
-    
-    # Negotiation = On Hold + Awaiting Budget
+
+    # 3) Negotiation = On Hold + Awaiting Budget (subset of Meeting)
     neg_sid = status_ids_by_name(["On Hold","Awaiting Budget"])
     neg_ids = pd.Index(
         leads_df.loc[
@@ -457,8 +464,8 @@ def show_executive_summary(d):
         ].dropna().astype(int).unique()
     ).intersection(meet_ids)
     neg_count = int(neg_ids.size)
-    
-    # Contract Signed = Won
+
+    # 4) Contract Signed = Won (subset of Meeting)
     won_sid = status_ids_by_name(["Won"])
     signed_ids = pd.Index(
         leads_df.loc[
@@ -467,8 +474,8 @@ def show_executive_summary(d):
         ].dropna().astype(int).unique()
     ).intersection(meet_ids)
     signed_count = int(signed_ids.size)
-    
-    # Lost = Lost
+
+    # 5) Lost = Lost (subset of Meeting)
     lost_sid = status_ids_by_name(["Lost"])
     lost_ids = pd.Index(
         leads_df.loc[
@@ -477,13 +484,12 @@ def show_executive_summary(d):
         ].dropna().astype(int).unique()
     ).intersection(meet_ids)
     lost_count = int(lost_ids.size)
-    
-    # Assemble funnel (subset logic removes need for artificial capping)
+
     funnel_df = pd.DataFrame({
         "Stage": ["New","Qualified","Meeting Scheduled","Negotiation","Contract Signed","Lost"],
         "Count": [new_count, qualified_count, meeting_count, neg_count, signed_count, lost_count]
     })
-    
+
     fig_funnel = px.funnel(
         funnel_df, x="Count", y="Stage",
         color_discrete_sequence=[EXEC_BLUE, EXEC_GREEN, EXEC_PRIMARY, "#FFA500", "#7CFC00", EXEC_DANGER]
@@ -496,6 +502,7 @@ def show_executive_summary(d):
         margin=dict(l=0, r=0, t=10, b=10)
     )
     st.plotly_chart(fig_funnel, use_container_width=True)
+
     # Top markets
     st.markdown("---"); st.subheader("Top markets")
     if countries is not None and "CountryId" in leads.columns and "countryname_e" in countries.columns:
