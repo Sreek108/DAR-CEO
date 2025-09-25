@@ -391,15 +391,13 @@ def show_executive_summary(d):
         with s3: st.plotly_chart(tile_bullet(rev_ts,"Revenue index",EXEC_GREEN), use_container_width=True)
         with s4: st.plotly_chart(tile_bullet(calls_ts,"Call success index","#7dd3fc"), use_container_width=True)
 
-    # -------------------------------------------------------------------------
-    # Lead conversion snapshot — REQUIRED ORDER AND NAMING
-    # New → Qualified → Meeting Scheduled → Negotiation → Signed Contract (Won) → Lost Contract (Lost)
-    # -------------------------------------------------------------------------
-    st.markdown("---"); st.subheader("Lead conversion snapshot")
+
+    # --- Lead conversion snapshot (coherent funnel) ---
+    st.markdown("---")
+    st.subheader("Lead conversion snapshot")
 
     statuses = d.get("lead_statuses")
-    stages   = d.get("lead_stages")
-
+    meetings = d.get("agent_meeting_assignment")
     leads_df = leads.copy()
 
     def ids_by_status_name(names):
@@ -411,70 +409,66 @@ def show_executive_summary(d):
             statuses.loc[statuses["statusname_e"].str.lower().isin(want), col_id]
             .astype(int).tolist()
         )
-
-    def ids_by_stage_number(stage_no):
-        if statuses is None or "leadstageid" not in statuses.columns:
-            return set()
-        col_id = "leadstatusid" if "leadstatusid" in statuses.columns else statuses.columns[0]
-        return set(statuses.loc[statuses["leadstageid"].astype("Int64")==stage_no, col_id].astype(int).tolist())
-
-    def col_in(df, name): 
+    
+    def col_in(df, name):
         return (df is not None) and (name in df.columns)
-
-    # 1) New (stage 1 or statuses under stage 1)
-    new_status_ids  = ids_by_stage_number(1)
-    new_mask = pd.Series(False, index=leads_df.index)
-    if col_in(leads_df, "LeadStatusId"): new_mask |= leads_df["LeadStatusId"].isin(new_status_ids)
-    if col_in(leads_df, "LeadStageId"):  new_mask |= leads_df["LeadStageId"].astype("Int64")==1
-    new_count = int(new_mask.sum())
-
-    # 2) Qualified — "Interested" or stage 2
-    qualified_ids = ids_by_status_name(["Interested"]) | ids_by_stage_number(2)
-    qual_mask = pd.Series(False, index=leads_df.index)
-    if col_in(leads_df,"LeadStatusId"): qual_mask |= leads_df["LeadStatusId"].isin(qualified_ids)
-    if col_in(leads_df,"LeadStageId"):  qual_mask |= leads_df["LeadStageId"].astype("Int64")==2
-    qualified_count = int(qual_mask.sum())
-
-    # 3) Meeting Scheduled — AgentMeetingAssignment with MeetingStatusId in {1=Scheduled, 6=Rescheduled}
+    
+    # 1) New = ALL unique leads in filtered scope
+    new_count = int(leads_df["LeadId"].nunique()) if col_in(leads_df, "LeadId") else int(len(leads_df))
+    
+    # 2) Qualified = Interested
+    qualified_ids = ids_by_status_name(["Interested"])
+    qualified_count = int(
+        leads_df.loc[leads_df["LeadStatusId"].isin(qualified_ids), "LeadId"].nunique()
+    ) if col_in(leads_df, "LeadStatusId") and col_in(leads_df, "LeadId") else 0
+    
+    # 3) Meeting Scheduled = AMA scheduled/rescheduled for current cohort
     meet_count = 0
-    meetings_df = meetings.copy() if meetings is not None else None
-    if meetings_df is not None and "leadid" in meetings_df.columns:
-        if "LeadId" in leads_df.columns:
-            meetings_df = meetings_df[meetings_df["leadid"].isin(leads_df["LeadId"])]
-        if "meetingstatusid" in meetings_df.columns:
-            meetings_df = meetings_df[meetings_df["meetingstatusid"].isin({1,6})]
-        if "startdatetime" in meetings_df.columns and "CreatedOn" in leads_df.columns:
-            lo = pd.to_datetime(leads_df["CreatedOn"], errors="coerce").min()
-            hi = pd.to_datetime(leads_df["CreatedOn"], errors="coerce").max()
-            if pd.notna(lo) and pd.notna(hi):
-                meetings_df["startdatetime"] = pd.to_datetime(meetings_df["startdatetime"], errors="coerce")
-                meetings_df = meetings_df[meetings_df["startdatetime"].between(lo, hi)]
-        meet_count = int(meetings_df["leadid"].nunique())
-
-    # 4) Negotiation — statuses "In Discussion" and "Awaiting Budget"
+    if meetings is not None:
+        m = meetings.copy()
+        # normalize columns to lower for resilient access
+        m.columns = [c.lower() for c in m.columns]
+        have_cols = set(m.columns)
+        if {"leadid","meetingstatusid"}.issubset(have_cols):
+            if col_in(leads_df, "LeadId"):
+                m = m[m["leadid"].isin(leads_df["LeadId"])]
+            m = m[m["meetingstatusid"].isin({1,6})]  # 1=Scheduled, 6=Rescheduled
+            # Optional: align to filtered window using leads CreatedOn bounds
+            if "startdatetime" in have_cols and col_in(leads_df, "CreatedOn"):
+                lo = pd.to_datetime(leads_df["CreatedOn"], errors="coerce").min()
+                hi = pd.to_datetime(leads_df["CreatedOn"], errors="coerce").max()
+                if pd.notna(lo) and pd.notna(hi):
+                    m["startdatetime"] = pd.to_datetime(m["startdatetime"], errors="coerce")
+                    m = m[m["startdatetime"].between(lo, hi)]
+            meet_count = int(m["leadid"].nunique())
+    
+    # 4) Negotiation = In Discussion + Awaiting Budget
     neg_ids = ids_by_status_name(["In Discussion","Awaiting Budget"])
-    neg_count = int(leads_df["LeadStatusId"].isin(neg_ids).sum()) if col_in(leads_df,"LeadStatusId") else 0
-
-    # 5) Signed Contract (Won)
+    neg_count = int(
+        leads_df.loc[leads_df["LeadStatusId"].isin(neg_ids), "LeadId"].nunique()
+    ) if col_in(leads_df, "LeadStatusId") and col_in(leads_df, "LeadId") else 0
+    
+    # 5) Signed Contract = Won
     won_ids = ids_by_status_name(["Won"])
-    won_count = int(leads_df["LeadStatusId"].isin(won_ids).sum()) if col_in(leads_df,"LeadStatusId") else 0
-
-    # 6) Lost Contract (Lost)
+    won_count = int(
+        leads_df.loc[leads_df["LeadStatusId"].isin(won_ids), "LeadId"].nunique()
+    ) if col_in(leads_df, "LeadStatusId") and col_in(leads_df, "LeadId") else 0
+    
+    # 6) Lost Contract = Lost
     lost_ids = ids_by_status_name(["Lost"])
-    lost_count = int(leads_df["LeadStatusId"].isin(lost_ids).sum()) if col_in(leads_df,"LeadStatusId") else 0
-
-    funnel_df = pd.DataFrame({
-        "Stage": [
-            "New",
-            "Qualified",
-            "Meeting Scheduled",
-            "Negotiation",
-            "Signed Contract",
-            "Lost Contract"
-        ],
-        "Count": [new_count, qualified_count, meet_count, neg_count, won_count, lost_count]
-    })
-
+    lost_count = int(
+        leads_df.loc[leads_df["LeadStatusId"].isin(lost_ids), "LeadId"].nunique()
+    ) if col_in(leads_df, "LeadStatusId") and col_in(leads_df, "LeadId") else 0
+    
+    # Enforce a proper funnel shape (each stage <= previous)
+    stages = ["New","Qualified","Meeting Scheduled","Negotiation","Signed Contract","Lost Contract"]
+    counts = [new_count, qualified_count, meet_count, neg_count, won_count, lost_count]
+    for i in range(1, len(counts)):
+        if counts[i] > counts[i-1]:
+            counts[i] = counts[i-1]
+    
+    funnel_df = pd.DataFrame({"Stage": stages, "Count": counts})
+    
     fig_funnel = px.funnel(
         funnel_df,
         x="Count",
