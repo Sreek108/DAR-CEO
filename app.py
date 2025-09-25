@@ -413,27 +413,31 @@ def show_executive_summary(d):
     def col_in(df, name):
         return (df is not None) and (name in df.columns)
     
-    # 1) New = ALL unique leads in filtered scope (cohort)
+    # 1) New = all unique leads in the current filtered window (cohort)
     if "LeadId" in leads_df.columns:
-        cohort_ids = set(leads_df["LeadId"].unique())
-        new_count = len(cohort_ids)
+        cohort_ids = pd.Index(leads_df["LeadId"].dropna().unique())
     else:
-        cohort_ids = set(range(len(leads_df)))
-        new_count = len(cohort_ids)
+        cohort_ids = pd.Index(leads_df.index)
+    new_count = int(cohort_ids.size)
     
-    # 2) Qualified = Interested drawn from the same cohort (not the whole DB)
-    qualified_ids_master = ids_by_status_name(["Interested"])
-    if "LeadStatusId" in leads_df.columns and "LeadId" in leads_df.columns:
-        qualified_count = int(
+    # 2) Qualified = Interested within the same cohort (no one outside New)
+    interested_ids_master = ids_by_status_name(["Interested"])
+    if {"LeadId","LeadStatusId"}.issubset(leads_df.columns):
+        qualified_lead_ids = (
             leads_df.loc[
-                (leads_df["LeadId"].isin(cohort_ids)) &
-                (leads_df["LeadStatusId"].isin(qualified_ids_master)),
+                leads_df["LeadStatusId"].isin(interested_ids_master),
                 "LeadId"
-            ].nunique()
+            ]
+            .dropna()
+            .astype(int)
+            .unique()
         )
+        # intersect with New cohort to guarantee subset
+        qualified_count = int(pd.Index(qualified_lead_ids).intersection(cohort_ids).size)
     else:
         qualified_count = 0
-    # Ensure funnel monotonicity (Qualified <= New)
+    
+    # hard cap to preserve funnel shape
     if qualified_count > new_count:
         qualified_count = new_count
     
