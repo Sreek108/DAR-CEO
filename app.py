@@ -331,8 +331,6 @@ def show_executive_summary(d):
     assigned_leads = int(leads["AssignedAgentId"].notna().sum()) if "AssignedAgentId" in leads.columns else 0
     agent_utilization = (assigned_leads/active_agents) if active_agents else 0.0
 
-    st.markdown("---")
-
     # Trend tiles (indexed)
     st.markdown("---"); st.subheader("Trend at a glance")
     trend_style = st.radio("Trend style", ["Line","Bars","Bullet"], index=0, horizontal=True, key="__trend_style_exec")
