@@ -389,65 +389,99 @@ def show_executive_summary(d):
         with s3: st.plotly_chart(tile_bullet(rev_ts,"Revenue index",EXEC_GREEN), use_container_width=True)
         with s4: st.plotly_chart(tile_bullet(calls_ts,"Call success index","#7dd3fc"), use_container_width=True)
 
-    # --- Lead conversion snapshot (status bars like Screenshot‑169) ---
+   # --- Lead conversion snapshot (requested structure) ---
     st.markdown("---")
     st.subheader("Lead conversion snapshot")
-
+    
     statuses = d.get("lead_statuses")
     leads_df = leads.copy()
-
-    desired_order = [
-        "Uncontacted",
-        "Attempted Contact",
-        "Interested",
-        "Not Interested",
-        "Follow-up Needed",
-        "In Discussion",
-        "On Hold",
-        "Awaiting Budget",
-        "Won",
-        "Lost",
-    ]
-
-    # Build id->label map
-    status_map = {}
-    if statuses is not None:
-        s = statuses.copy()
-        s.columns = s.columns.str.lower()
-        if {"leadstatusid","statusname_e"}.issubset(s.columns):
-            status_map = dict(zip(s["leadstatusid"].astype(int), s["statusname_e"].astype(str)))
-
-    # Count leads by status in the filtered window
-    if "LeadStatusId" in leads_df.columns:
-        cnt = (
-            leads_df["LeadStatusId"].dropna().astype(int)
-            .value_counts()
-            .rename_axis("LeadStatusId")
-            .reset_index(name="Count")
+    
+    def status_ids(names):
+        if statuses is None or "statusname_e" not in statuses.columns:
+            return set()
+        col_id = "leadstatusid" if "leadstatusid" in statuses.columns else statuses.columns[0]
+        return set(
+            statuses.loc[statuses["statusname_e"].str.lower().isin([n.lower() for n in names]), col_id]
+            .astype(int).tolist()
         )
-    else:
-        cnt = pd.DataFrame(columns=["LeadStatusId","Count"])
-
-    cnt["Status"] = cnt["LeadStatusId"].map(status_map).fillna("Unknown")
-
-    # Reindex to desired order and fill zeros for missing statuses
-    order_df = pd.DataFrame({"Status": desired_order})
-    viz_df = order_df.merge(cnt[["Status","Count"]], on="Status", how="left").fillna({"Count": 0})
-    viz_df["Count"] = viz_df["Count"].astype(int)
-
-    fig = px.bar(
-        viz_df, x="Count", y="Status", orientation="h", text="Count",
-        color_discrete_sequence=[EXEC_BLUE],
+    
+    def have(df, cols): 
+        return (df is not None) and set(cols).issubset(df.columns)
+    
+    # 1) New = total unique leads in the current filtered window
+    new_count = int(leads_df["LeadId"].dropna().nunique()) if have(leads_df, ["LeadId"]) else 0
+    
+    # 2) Interested = status "Interested"
+    interested_set = status_ids(["Interested"])
+    interested_count = int(
+        leads_df.loc[
+            have(leads_df, ["LeadStatusId","LeadId"]) & leads_df["LeadStatusId"].isin(interested_set),
+            "LeadId"
+        ].dropna().nunique()
     )
-    fig.update_layout(
-        height=420,
+    
+    # 3) Meeting Scheduled = status "In Discussion" (as per mapping)
+    in_discussion_set = status_ids(["In Discussion"])
+    meeting_sched_count = int(
+        leads_df.loc[
+            have(leads_df, ["LeadStatusId","LeadId"]) & leads_df["LeadStatusId"].isin(in_discussion_set),
+            "LeadId"
+        ].dropna().nunique()
+    )
+    
+    # 4) Negotiation = statuses "On Hold" + "Awaiting Budget"
+    neg_set = status_ids(["On Hold","Awaiting Budget"])
+    neg_count = int(
+        leads_df.loc[
+            have(leads_df, ["LeadStatusId","LeadId"]) & leads_df["LeadStatusId"].isin(neg_set),
+            "LeadId"
+        ].dropna().nunique()
+    )
+    
+    # 5) Contract Signed = status "Won"
+    won_set = status_ids(["Won"])
+    signed_count = int(
+        leads_df.loc[
+            have(leads_df, ["LeadStatusId","LeadId"]) & leads_df["LeadStatusId"].isin(won_set),
+            "LeadId"
+        ].dropna().nunique()
+    )
+    
+    # 6) Lost = status "Lost"
+    lost_set = status_ids(["Lost"])
+    lost_count = int(
+        leads_df.loc[
+            have(leads_df, ["LeadStatusId","LeadId"]) & leads_df["LeadStatusId"].isin(lost_set),
+            "LeadId"
+        ].dropna().nunique()
+    )
+    
+    # Build and render funnel
+    funnel_df = pd.DataFrame({
+        "Stage": [
+            "New",
+            "Interested",
+            "Meeting Scheduled",
+            "Negotiation",
+            "Contract Signed",
+            "Lost"
+        ],
+        "Count": [new_count, interested_count, meeting_sched_count, neg_count, signed_count, lost_count]
+    })
+    
+    fig_funnel = px.funnel(
+        funnel_df, x="Count", y="Stage",
+        color_discrete_sequence=[EXEC_BLUE, EXEC_GREEN, EXEC_PRIMARY, "#FFA500", "#7CFC00", EXEC_DANGER]
+    )
+    fig_funnel.update_layout(
+        height=340,
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
         font_color="white",
-        margin=dict(l=0, r=10, t=10, b=10),
+        margin=dict(l=0, r=0, t=10, b=10)
     )
-    fig.update_traces(textposition="outside", cliponaxis=False)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig_funnel, use_container_width=True)
+
 
     # Top markets
     st.markdown("---"); st.subheader("Top markets")
