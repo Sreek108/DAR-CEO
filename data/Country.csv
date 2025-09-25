@@ -1,0 +1,9 @@
+CountryId,CountryCode,CountryName_E,CountryName_A,IsActive
+1,SA,Saudi Arabia,المملكة العربية السعودية,1
+2,AE,United Arab Emirates,الإمارات العربية المتحدة,1
+3,IN,India,الهند,1
+4,UK,United Kingdom,المملكة المتحدة,1
+5,US,United States,الولايات المتحدة,1
+6,AU,Australia,أستراليا,1
+7,JP,Japan,اليابان,1
+8,SG,Singapore,سنغافورة,1

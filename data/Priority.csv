@@ -1,0 +1,6 @@
+PriorityId,PriorityName_E,PriorityName_A,PriorityLevel,IsActive
+1,Critical,حرج,1,1
+2,High,عالي,2,1
+3,Medium,متوسط,3,1
+4,Low,منخفض,4,1
+5,Optional,اختياري,5,1

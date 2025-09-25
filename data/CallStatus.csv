@@ -1,0 +1,6 @@
+CallStatusId,StatusName_E,StatusName_A,IsActive
+1,Connected,متصل,1
+2,No Answer,لا يجيب,1
+3,Busy Signal,خط مشغول,1
+4,Failed,فاشل,1
+5,Declined,مرفوض,1

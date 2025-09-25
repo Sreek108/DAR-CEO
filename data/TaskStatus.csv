@@ -1,0 +1,6 @@
+TaskStatusId,StatusName_E,StatusName_A,IsActive
+1,Pending,معلق,1
+2,In Progress,قيد التقدم,1
+3,Completed,مكتمل,1
+4,Cancelled,ملغي,1
+5,Overdue,متأخر,1

@@ -1,0 +1,11 @@
+LeadStatusId,StatusName_E,StatusName_A,LeadStageId,IsActive
+1,Uncontacted,لم يتم الاتصال,1,1
+2,Attempted Contact,تم محاولة الاتصال,1,1
+3,Interested,مهتم,2,1
+4,Not Interested,غير مهتم,2,1
+5,Follow-up Needed,يحتاج متابعة,2,1
+6,In Discussion,في النقاش,3,1
+7,On Hold,معلق,3,1
+8,Awaiting Budget,في انتظار الميزانية,3,1
+9,Won,فاز,4,1
+10,Lost,خسر,4,1

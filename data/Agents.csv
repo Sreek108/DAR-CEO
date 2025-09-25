@@ -1,0 +1,21 @@
+AgentId,AgentCode,FirstName,LastName,Email,Phone,Role,CountryId,CityRegionId
+1,AGENT001,Danielle,Johnson,agent1@crm.com,533-521-8196x001,Lead Nurture Specialist,2,1
+2,AGENT002,William,Johnson,agent2@crm.com,886.737.9402,Lead Nurture Specialist,5,4
+3,AGENT003,Joshua,Lewis,agent3@crm.com,001-851-316-1559x40781,AI Agent,3,2
+4,AGENT004,Andrea,Calderon,agent4@crm.com,+1-659-931-0341x316,Lead Nurture Specialist,2,10
+5,AGENT005,Cynthia,Diaz,agent5@crm.com,(653)541-9283x276,Senior Closer,1,1
+6,AGENT006,Gabrielle,Cameron,agent6@crm.com,001-903-405-6413x95376,AI Agent,4,4
+7,AGENT007,Joseph,Wright,agent7@crm.com,+1-484-996-9653,Lead Nurture Specialist,1,9
+8,AGENT008,Christopher,Williams,agent8@crm.com,922-669-1669,AI Agent,7,4
+9,AGENT009,Tasha,Valencia,agent9@crm.com,9182451462,Senior Closer,5,1
+10,AGENT010,Stephanie,Liu,agent10@crm.com,282-781-4893x252,AI Agent,7,6
+11,AGENT011,Tracy,Rodriguez,agent11@crm.com,(443)903-9117x182,Senior Closer,3,4
+12,AGENT012,Stacey,Martin,agent12@crm.com,596.338.3465x78713,Senior Closer,2,2
+13,AGENT013,Matthew,Chapman,agent13@crm.com,793.301.0310,Senior Closer,2,6
+14,AGENT014,Willie,Ramirez,agent14@crm.com,838.729.9737x6311,Senior Closer,5,1
+15,AGENT015,Rodney,Owens,agent15@crm.com,001-801-406-5133x3872,Lead Nurture Specialist,8,9
+16,AGENT016,Joshua,Wright,agent16@crm.com,478-810-8013,AI Agent,7,2
+17,AGENT017,Todd,Lewis,agent17@crm.com,(502)660-6474x6872,Lead Nurture Specialist,5,10
+18,AGENT018,Jeff,Brown,agent18@crm.com,001-380-450-0978x8208,Senior Closer,4,2
+19,AGENT019,Casey,Jones,agent19@crm.com,361.893.9909,AI Agent,4,5
+20,AGENT020,Diane,Cunningham,agent20@crm.com,343-353-4624x75107,AI Agent,4,2

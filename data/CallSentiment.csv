@@ -1,0 +1,4 @@
+SentimentId,SentimentName_E,SentimentName_A,IsActive
+1,Positive,إيجابي,1
+2,Neutral,محايد,1
+3,Negative,سلبي,1

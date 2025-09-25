@@ -1,0 +1,7 @@
+TaskTypeId,TypeName_E,TypeName_A,IsActive
+1,Call,مكالمة,1
+2,Email,بريد إلكتروني,1
+3,Meeting,اجتماع,1
+4,Demo,عرض توضيحي,1
+5,WhatsApp,واتساب,1
+6,Follow-up Document,مستند متابعة,1
