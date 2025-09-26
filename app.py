@@ -844,17 +844,20 @@ def show_calls(d):
             color_discrete_sequence=px.colors.sequential.RdPu,
             title="Outcomes"
         )
-        fig.update_traces(textposition="inside", textinfo="percent+label")  # readable labels
+        fig.update_traces(textposition="inside", textinfo="percent+label")
         fig.update_layout(
-            height=320,  # bigger height
-            margin=dict(l=20, r=20, t=70, b=90),
-            legend=dict(orientation="h", yanchor="bottom", y=-0.05, xanchor="center", x=0.5),
-            font=dict(size=14),
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-            font_color="white"
-        )
-        st.plotly_chart(fig, use_container_width=True)  # uses full width for an even bigger feel [file:324]
+                height=520,
+                margin=dict(l=10, r=10, t=60, b=80),   # <- larger bottom margin creates space
+                legend=dict(orientation="h", yanchor="bottom", y=-0.18, xanchor="center", x=0.5),
+                font=dict(size=14),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                font_color="white"
+        ) 
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Spacer between chart and KPI row
+        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)# uses full width for an even bigger feel [file:324]
 
         # KPIs in one row
         total_calls = int(len(C))
