@@ -995,54 +995,39 @@ def show_conversions(d):
     st.markdown("---")
     st.subheader("Conversion Funnel (counts)")
 
-    # Qualified: all statuses in stage 2; Negotiation: On Hold/Awaiting Budget
-    qualified_ids, nego_ids = set(), set()
-    if statuses is not None:
-        s = statuses.copy()
-        s["leadstageid"] = pd.to_numeric(s.get("leadstageid"), errors="coerce").astype("Int64")
-        s["leadstatusid"] = pd.to_numeric(s.get("leadstatusid"), errors="coerce").astype("Int64")
-        s["statusname_e_norm"] = s.get("statusname_e", pd.Series(dtype=object)).astype(str).str.strip().str.lower()
-        qualified_ids = set(s.loc[s["leadstageid"].eq(2), "leadstatusid"].dropna().astype(int).tolist())
-        nego_mask = s["statusname_e_norm"].isin(["on hold", "awaiting budget"])
-        nego_ids = set(s.loc[nego_mask, "leadstatusid"].dropna().astype(int).tolist())
-
-    new_count = int(L["LeadId"].nunique())
-    qualified_count = int(L.loc[L["LeadStatusId"].isin(qualified_ids), "LeadId"].nunique()) if qualified_ids else 0
-
-    # Meetings scheduled/rescheduled -> meeting_count
-    meet_leads = set()
-    meeting_count = 0
-    if meets is not None and len(meets):
-        M = meets.copy()
-        M.columns = M.columns.str.lower()
-        if "startdatetime" in M.columns:
-            if "meetingstatusid" in M.columns:
-                M = M[M["meetingstatusid"].isin({1, 6})]
-            meet_leads = set(pd.to_numeric(M["leadid"], errors="coerce").dropna().astype(int).tolist())
-            meeting_count = int(len(meet_leads))
-
-    nego_count = int(L.loc[L["LeadStatusId"].isin(nego_ids) & L["LeadId"].isin(meet_leads), "LeadId"].nunique()) if nego_ids else 0
-    won_count = wins
-    lost_count = losses
+    # Qualified and negotiation ids already computed above...
+    # new_count, qualified_count, meeting_count, nego_count, won_count, lost_count already computed
 
     funnel_df = pd.DataFrame({
-        "Stage": ["New", "Qualified", "Meeting Scheduled", "Negotiation", "Won", "Lost"],
+        "Stage": ["New","Qualified","Meeting Scheduled","Negotiation","Won","Lost"],
         "Count": [new_count, qualified_count, meeting_count, nego_count, won_count, lost_count]
     })
+
+    # Option: hide zero-count stages to avoid spiky wedges
+    show_zero_stages = False  # set True to keep zeros visible
+    if not show_zero_stages:
+        funnel_df = funnel_df[funnel_df["Count"]>0]
+
     fig = px.funnel(
         funnel_df,
         x="Count",
         y="Stage",
-        color_discrete_sequence=["#1E90FF", "#32CD32", "#DAA520", "#FFA500", "#7CFC00", "#DC143C"]
+        color_discrete_sequence=["#1E90FF","#32CD32","#DAA520","#FFA500","#7CFC00","#DC143C"],
+        title="Conversion Funnel (counts)"
     )
+    # Bigger chart + more whitespace
+    fig.update_traces(textposition="inside", textinfo="value+percent initial")  # clearer labels
     fig.update_layout(
-        height=340,
+        height=420,
+        margin=dict(l=30, r=30, t=70, b=60),  # add space above/below/left/right
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
-        font_color="white",
-        margin=dict(l=0, r=0, t=10, b=10)
+        font_color="white"
     )
     st.plotly_chart(fig, use_container_width=True)
+
+    # Spacer below the funnel so the next section/KPIs don’t crowd it
+    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
 # Geo AI page (performance + AI recommendations)
