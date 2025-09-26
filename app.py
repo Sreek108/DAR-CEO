@@ -500,7 +500,7 @@ def _recent_agg(df, when_col, cutoff, days=14):
     g = x.groupby("LeadId").agg(
         n=("LeadId","count"),
         connected=("CallStatusId", lambda s: (s==1).mean() if "CallStatusId" in x.columns else 0.0),
-        mean_dur=("DurationSeconds", "mean") if "DurationSeconds" in x.columns else ("LeadId","count")
+        mean_dur=("DurationSeconds", "mean") if "DurationSeconds" in x.columns else ("LeadId","count")  
     ).reset_index()
     last = x.groupby("LeadId")[when_col].max().reset_index().rename(columns={when_col:"last_dt"})
     g = g.merge(last, on="LeadId", how="left")
@@ -832,10 +832,12 @@ def show_geo_ai(d):
         C = calls.copy()
         C["CallDateTime"] = pd.to_datetime(C.get("CallDateTime"), errors="coerce")
         C = C.merge(L[["LeadId","CountryId"]], on="LeadId", how="left")
-        g = C.groupby("CountryId").agg(total=("LeadCallId","count"),
-                                       connects=("CallStatusId", lambda s:(s==1).sum())).reset_index()
+        g = C.groupby("CountryId").agg(
+            total=("LeadCallId","count"),
+            connects=("CallStatusId", lambda s:(s==1).sum())
+        ).reset_index()
         g["connect_rate"] = (g["connects"]/g["total"]).fillna(0.0)
-        conn = g[{"CountryId","connect_rate"}] if isinstance(g, pd.DataFrame) else conn
+        conn = g[["CountryId","connect_rate"]]  # list, not set
 
         # ensure correct cols if set was used mistakenly
         if isinstance(conn, set) or not isinstance(conn, pd.DataFrame):
