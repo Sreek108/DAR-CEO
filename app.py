@@ -658,32 +658,124 @@ def show_ai_insights(d):
 # Lead Status page
 # -----------------------------------------------------------------------------
 def show_lead_status(d):
-    leads=d.get("leads"); statuses=d.get("lead_statuses")
-    if leads is None or len(leads)==0 or "LeadStatusId" not in leads.columns:
-        st.info("No lead status data in the selected range."); return
-    lbl_map={}
-    if statuses is not None and "leadstatusid" in statuses.columns:
-        name_col = "statusname_e" if "statusname_e" in statuses.columns else None
-        for _,r in statuses.iterrows():
-            lbl_map[int(r["leadstatusid"])]= str(r[name_col]) if name_col else f"Status {int(r['leadstatusid'])}"
-    counts = leads["LeadStatusId"].value_counts().reset_index()
-    counts.columns=["LeadStatusId","count"]
-    counts["label"] = counts["LeadStatusId"].map(lbl_map).fillna(counts["LeadStatusId"].astype(str))
+    leads = d.get("leads"); statuses = d.get("lead_statuses")
+    calls  = d.get("calls"); meets = d.get("agent_meeting_assignment")
+
+    if leads is None or len(leads)==0:
+        st.info("No lead status data in the selected range."); 
+        return
+
+    # Map status ids -> names
+    name_map = {}
+    if statuses is not None and {"leadstatusid","statusname_e"}.issubset(statuses.columns):
+        name_map = dict(zip(statuses["leadstatusid"].astype(int), statuses["statusname_e"].astype(str)))
+    leads = leads.copy()
+    leads["Status"] = leads["LeadStatusId"].map(name_map).fillna(leads.get("LeadStatusId", pd.Series(dtype="Int64")).astype(str))
+    leads["CreatedOn"] = pd.to_datetime(leads.get("CreatedOn"), errors="coerce")
+    cutoff = leads["CreatedOn"].max() if "CreatedOn" in leads.columns else pd.Timestamp.today()
+    leads["age_days"] = (cutoff - leads["CreatedOn"]).dt.days.astype("Int64")
+
+    # Summary donut and headline KPIs (kept)
+    counts = leads["Status"].value_counts().reset_index()
+    counts.columns = ["Status","count"]
     c1,c2 = st.columns([2,1])
     with c1:
-        fig = px.pie(counts, names="label", values="count", hole=0.35, color_discrete_sequence=px.colors.sequential.Viridis)
+        fig = px.pie(counts, names="Status", values="count", hole=0.35, color_discrete_sequence=px.colors.sequential.Viridis,
+                     title="Lead Status Share")
         fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white")
         st.plotly_chart(fig, use_container_width=True)
     with c2:
-        st.metric("Total Leads", format_number(len(leads)))
+        st.metric("Total Leads", f"{len(leads):,}")
         won_id = None
         if statuses is not None and "statusname_e" in statuses.columns:
             m = statuses.loc[statuses["statusname_e"].str.lower()=="won"]
             if not m.empty: won_id = int(m.iloc[0]["leadstatusid"])
-        won = int((leads["LeadStatusId"]==won_id).sum()) if won_id is not None else 0
-        disc_ids = statuses.loc[statuses["statusname_e"].str.contains("discussion", case=False, na=False), "leadstatusid"].tolist() if statuses is not None else []
-        in_discuss = int(leads["LeadStatusId"].isin(disc_ids).sum()) if len(disc_ids) else 0
-        st.metric("In Discussion", format_number(in_discuss))
+        won = int((leads.get("LeadStatusId", pd.Series(dtype="Int64")).astype("Int64")==won_id).sum()) if won_id is not None else 0
+        st.metric("Won", f"{won:,}")
+
+    # -------------- Lead Distribution Status --------------
+    st.markdown("---"); st.subheader("Lead Distribution Status")
+
+    # Horizontal bar distribution
+    dist_sorted = counts.sort_values("count", ascending=True)
+    fig_bar = px.bar(dist_sorted, x="count", y="Status", orientation="h",
+                     title="Leads by status (sorted)", color="Status", color_discrete_sequence=px.colors.qualitative.Dark24)
+    fig_bar.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white", height=360,
+                          showlegend=False, margin=dict(l=0,r=0,t=40,b=0))
+    st.plotly_chart(fig_bar, use_container_width=True)
+
+    # Optional stacked trend by period (uses fdata period already set)
+    if "period" not in leads.columns and "CreatedOn" in leads.columns:
+        leads["period"] = leads["CreatedOn"].dt.to_period("M").apply(lambda p: p.start_time.date())
+    if "period" in leads.columns:
+        normalize = st.checkbox("Normalize to 100% per period", value=False, key="ls_norm")
+        trend = leads.groupby(["period","Status"]).size().reset_index(name="count")
+        if normalize:
+            totals = trend.groupby("period")["count"].transform("sum").replace(0, np.nan)
+            trend["count"] = (trend["count"]/totals*100).round(1)
+            y_title = "Share %"
+        else:
+            y_title = "Count"
+        fig_stack = px.bar(trend.sort_values("period"), x="period", y="count", color="Status", barmode="stack",
+                           title=f"Status mix by period ({y_title})")
+        fig_stack.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white",
+                                height=360, margin=dict(l=0,r=0,t=40,b=0))
+        st.plotly_chart(fig_stack, use_container_width=True)
+
+    # -------------- Detailed Lead Breakdown --------------
+    st.markdown("---"); st.subheader("Detailed Lead Breakdown")
+
+    # Meeting intent per status (Scheduled/Rescheduled)
+    meet_rate = pd.DataFrame({"Status": pd.Series(dtype="str"), "meet_leads": pd.Series(dtype="float")})
+    if meets is not None and len(meets):
+        M = meets.copy(); M.columns = M.columns.str.lower()
+        dtc = "startdatetime" if "startdatetime" in M.columns else None
+        if dtc is not None:
+            if "meetingstatusid" in M.columns:
+                M = M[M["meetingstatusid"].isin({1,6})]  # Scheduled/Rescheduled
+            mm = M.merge(leads[["LeadId","Status"]], left_on="leadid", right_on="LeadId", how="left")
+            meet_rate = mm.groupby("Status")["leadid"].nunique().reset_index(name="meet_leads")
+
+    # Connect rate per status
+    conn_rate = pd.DataFrame({"Status": pd.Series(dtype="str"), "connect_rate": pd.Series(dtype="float")})
+    if calls is not None and len(calls):
+        C = calls.copy()
+        C["CallDateTime"] = pd.to_datetime(C.get("CallDateTime"), errors="coerce")
+        C = C.merge(leads[["LeadId","Status"]], on="LeadId", how="left")
+        g = C.groupby("Status").agg(total=("LeadCallId","count"),
+                                    connects=("CallStatusId", lambda s:(s==1).sum())).reset_index()
+        g["connect_rate"] = (g["connects"]/g["total"]).fillna(0.0)
+        conn_rate = g[["Status","connect_rate"]]
+
+    # Aggregate breakdown
+    base = leads.groupby("Status").agg(
+        Leads=("LeadId","count"),
+        Avg_Age_Days=("age_days","mean"),
+        Pipeline=("EstimatedBudget","sum")
+    ).reset_index()
+    total_leads = float(base["Leads"].sum()) if len(base) else 0.0
+    base["Share_%"] = (base["Leads"]/total_leads*100.0).round(1) if total_leads>0 else 0.0
+
+    breakdown = (base.merge(meet_rate, on="Status", how="left")
+                      .merge(conn_rate, on="Status", how="left"))
+    breakdown["meet_leads"] = breakdown["meet_leads"].fillna(0.0)
+    breakdown["Meeting_Rate_%"] = (breakdown["meet_leads"]/breakdown["Leads"]*100.0).replace([np.inf, -np.inf], 0).fillna(0.0).round(1)
+    breakdown["connect_rate"] = breakdown["connect_rate"].fillna(0.0).round(2)
+    breakdown["Avg_Age_Days"] = breakdown["Avg_Age_Days"].fillna(0.0).round(1)
+    breakdown = breakdown.sort_values(["Leads","Pipeline"], ascending=False)
+
+    st.dataframe(
+        breakdown[["Status","Leads","Share_%","Avg_Age_Days","Meeting_Rate_%","connect_rate","Pipeline"]],
+        use_container_width=True, hide_index=True,
+        column_config={
+            "Leads": st.column_config.NumberColumn("Leads", format="%,d"),
+            "Share_%": st.column_config.ProgressColumn("Share", min_value=0.0, max_value=100.0, format="%.1f%%"),
+            "Avg_Age_Days": st.column_config.NumberColumn("Avg age (days)", format="%.1f"),
+            "Meeting_Rate_%": st.column_config.ProgressColumn("Meeting rate", min_value=0.0, max_value=100.0, format="%.1f%%"),
+            "connect_rate": st.column_config.ProgressColumn("Connect rate", min_value=0.0, max_value=1.0, format="%.2f"),
+            "Pipeline": st.column_config.NumberColumn("Pipeline", format="%.0f"),
+        }
+    )
 
 # -----------------------------------------------------------------------------
 # Calls page (basic)
