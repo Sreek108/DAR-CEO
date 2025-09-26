@@ -827,35 +827,48 @@ def show_calls(d):
     cs = d.get("call_statuses")
     name_map = {}
     if cs is not None and {"callstatusid","statusname_e"}.issubset(cs.columns):
-        name_map = dict(zip(cs["callstatusid"].astype(int), cs["statusname_e"].astype(str)))
+        name_map = dict(zip(cs["callstatusid"].astype(int), cs["statusname_e"].astype(str)))  # labels from master [file:345]
 
     if "CallStatusId" in C.columns:
         dist = C.copy()
         dist["Status"] = dist["CallStatusId"].map(name_map).fillna(dist["CallStatusId"].astype(str))
         donut = dist["Status"].value_counts().reset_index()
         donut.columns = ["Status","count"]
-        fig = px.pie(donut, names="Status", values="count", hole=0.45,
-                     color_discrete_sequence=px.colors.sequential.RdPu, title="Outcomes")
-        fig.update_layout(height=360, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white")
-        st.plotly_chart(fig, use_container_width=True)
 
-        # KPI cards (trimmed to requested set)
+        # Bigger donut
+        fig = px.pie(
+            donut,
+            names="Status",
+            values="count",
+            hole=0.45,
+            color_discrete_sequence=px.colors.sequential.RdPu,
+            title="Outcomes"
+        )
+        fig.update_traces(textposition="inside", textinfo="percent+label")  # readable labels
+        fig.update_layout(
+            height=520,  # bigger height
+            margin=dict(l=10, r=10, t=60, b=10),
+            legend=dict(orientation="h", yanchor="bottom", y=-0.05, xanchor="center", x=0.5),
+            font=dict(size=14),
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
+            font_color="white"
+        )
+        st.plotly_chart(fig, use_container_width=True)  # uses full width for an even bigger feel [file:324]
+
+        # KPIs in one row
         total_calls = int(len(C))
-        connected_calls = int((C["CallStatusId"]==1).sum()) if "CallStatusId" in C.columns else 0
+        connected_calls = int((C["CallStatusId"]==1).sum())
         connect_rate = (connected_calls/total_calls*100.0) if total_calls else 0.0
-        avg_duration = float(pd.to_numeric(C.get("DurationSeconds", pd.Series(dtype=float)), errors="coerce")
-                             .dropna().mean()) if "DurationSeconds" in C.columns else 0.0
+        avg_duration = float(pd.to_numeric(C.get("DurationSeconds", pd.Series(dtype=float)), errors="coerce").dropna().mean()) if "DurationSeconds" in C.columns else 0.0  # [file:324]
 
-        k1,k2 = st.columns(2)
-        with k1:
-            st.metric("Total calls", f"{total_calls:,}")
-            st.metric("Connected calls", f"{connected_calls:,}")
-        with k2:
-            st.metric("Connect rate", f"{connect_rate:.1f}%")
-            st.metric("Avg duration (sec)", f"{avg_duration:.1f}")
+        k1,k2,k3,k4 = st.columns(4)
+        with k1: st.metric("Total calls", f"{total_calls:,}")                                    # [file:324]
+        with k2: st.metric("Connected calls", f"{connected_calls:,}")                            # [file:324]
+        with k3: st.metric("Connect rate", f"{connect_rate:.1f}%")                               # [file:324]
+        with k4: st.metric("Avg duration (sec)", f"{avg_duration:.1f}")                          # [file:324]
     else:
-        st.info("CallStatusId not available to render distribution and KPIs.")
-
+        st.info("CallStatusId not available to render distribution and KPIs.") 
     # ---------------- Effectiveness by attempt number (kept) ----------------
     st.markdown("---"); st.subheader("Effectiveness by attempt number")
     if {"LeadId","CallDateTime","CallStatusId","LeadCallId"}.issubset(C.columns):
