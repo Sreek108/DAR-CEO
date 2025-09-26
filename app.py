@@ -262,9 +262,9 @@ NAV = [
     ("Executive","speedometer2","🎯 Executive Summary"),
     ("Lead Status","people","📈 Lead Status"),
     ("AI Calls","telephone","📞 AI Call Activity"),
-    ("Conversion","bar-chart","📊 Conversion")
     ("AI Insights","robot","🤖 AI Insights"),
-    ("Geo AI","globe","🌍 Geo AI")  # NEW
+    ("Conversion","bar-chart-line","📊 Conversion"),  # <-- comma added and icon fixed
+    ("Geo AI","globe","🌍 Geo AI")
 ]
 if HAS_OPTION_MENU:
     selected = option_menu(None, [n[0] for n in NAV], icons=[n[1] for n in NAV], orientation="horizontal", default_index=0,
@@ -1237,16 +1237,16 @@ def show_geo_ai(d):
 # Router
 # -----------------------------------------------------------------------------
 if HAS_OPTION_MENU:
-    if selected=="Executive": show_executive_summary(fdata)
-    elif selected=="Lead Status": show_lead_status(fdata)
-    elif selected=="AI Calls": show_calls(fdata)
-    elif selected=="Conversion": show_conversions(fdata)
-    elif selected=="AI Insights": show_ai_insights(fdata)
-    elif selected=="Geo AI": show_geo_ai(fdata)
+    if selected=="Executive":          show_executive_summary(fdata)
+    elif selected=="Lead Status":       show_lead_status(fdata)
+    elif selected=="AI Calls":          show_calls(fdata)
+    elif selected=="AI Insights":       show_ai_insights(fdata)
+    elif selected=="Conversion":        show_conversions(fdata)   # Conversion page
+    elif selected=="Geo AI":            show_geo_ai(fdata)
 else:
     with tabs[0]: show_executive_summary(fdata)
     with tabs[1]: show_lead_status(fdata)
     with tabs[2]: show_calls(fdata)
-    with tabs[3]: show_conversions(fdata)
-    with tabs[4]: show_ai_insights(fdata)
+    with tabs[3]: show_ai_insights(fdata)
+    with tabs[4]: show_conversions(fdata)  # Conversion page
     with tabs[5]: show_geo_ai(fdata)
