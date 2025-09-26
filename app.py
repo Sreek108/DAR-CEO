@@ -262,6 +262,7 @@ NAV = [
     ("Executive","speedometer2","🎯 Executive Summary"),
     ("Lead Status","people","📈 Lead Status"),
     ("AI Calls","telephone","📞 AI Call Activity"),
+    ("Conversion","bar-chart","📊 Conversion")
     ("AI Insights","robot","🤖 AI Insights"),
     ("Geo AI","globe","🌍 Geo AI")  # NEW
 ]
@@ -891,6 +892,122 @@ def show_calls(d):
     else:
         st.info("Insufficient fields to analyze attempts (need LeadId, CallDateTime, CallStatusId, LeadCallId).")
 
+
+def show_conversions(d):
+    st.subheader("Conversion — Wins vs Dropped (no revenue/pipeline)")
+
+    leads = d.get("leads")
+    statuses = d.get("lead_statuses")
+    meets = d.get("agent_meeting_assignment")
+
+    if leads is None or len(leads)==0:
+        st.info("No data available in the selected range.")
+        return
+
+    # Resolve status ids
+    won_id, lost_id = 9, 10
+    if statuses is not None and {"statusname_e","leadstatusid"}.issubset(statuses.columns):
+        s = statuses.copy()
+        s["statusname_e"] = s["statusname_e"].str.lower()
+        w = s.loc[s["statusname_e"]=="won", "leadstatusid"]
+        l = s.loc[s["statusname_e"]=="lost", "leadstatusid"]
+        if not w.empty: won_id = int(w.iloc[0])
+        if not l.empty: lost_id = int(l.iloc[0])
+
+    L = leads.copy()
+    L["LeadStatusId"] = pd.to_numeric(L.get("LeadStatusId"), errors="coerce").astype("Int64")
+    # Ensure a period exists (uses month by default if missing)
+    if "period" not in L.columns:
+        dt = pd.to_datetime(L.get("CreatedOn"), errors="coerce")
+        L["period"] = dt.dt.to_period("M").apply(lambda p: p.start_time.date())
+
+    # Monthly conversions vs dropped
+    per_total = L.groupby("period").size().rename("total")
+    per_won = L.loc[L["LeadStatusId"].eq(won_id)].groupby("period").size().rename("won")
+    per_lost = L.loc[L["LeadStatusId"].eq(lost_id)].groupby("period").size().rename("lost")
+    conv = pd.concat([per_total, per_won, per_lost], axis=1).fillna(0.0).reset_index()
+    conv["conv_rate"] = (conv["won"]/conv["total"]*100).round(1)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        fig = px.bar(
+            conv.sort_values("period"),
+            x="period", y=["won","lost"],
+            barmode="group",
+            color_discrete_sequence=["#32CD32","#DC143C"],
+            title="Monthly conversions vs dropped"
+        )
+        fig.update_layout(height=340, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white",
+                          margin=dict(l=0,r=0,t=40,b=0))
+        st.plotly_chart(fig, use_container_width=True)
+
+    with c2:
+        fig = px.line(
+            conv.sort_values("period"),
+            x="period", y="conv_rate", markers=True,
+            title="Conversion rate trend (%)"
+        )
+        fig.update_layout(height=340, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white",
+                          margin=dict(l=0,r=0,t=40,b=0))
+        st.plotly_chart(fig, use_container_width=True)
+
+    # KPIs (no revenue/pipeline)
+    total = int(len(L))
+    wins = int(L["LeadStatusId"].eq(won_id).sum())
+    losses = int(L["LeadStatusId"].eq(lost_id).sum())
+    conv_rate_overall = (wins/total*100.0) if total else 0.0
+    drop_rate_overall = (losses/total*100.0) if total else 0.0
+
+    # YTD conversions (based on CreatedOn year to date)
+    ytd_wins = 0
+    if "CreatedOn" in L.columns:
+        dt = pd.to_datetime(L["CreatedOn"], errors="coerce")
+        ystart = pd.Timestamp(year=pd.Timestamp.today().year, month=1, day=1)
+        ytd_wins = int(L.loc[(dt>=ystart) & L["LeadStatusId"].eq(won_id)].shape[0])
+
+    k1,k2,k3 = st.columns(3)
+    with k1: st.metric("YTD conversions", f"{ytd_wins:,}")
+    with k2: st.metric("Conversion rate", f"{conv_rate_overall:.1f}%")
+    with k3: st.metric("Drop rate", f"{drop_rate_overall:.1f}%")
+
+    # Simple conversion funnel (no revenue/pipeline)
+    st.markdown("---"); st.subheader("Conversion Funnel (counts)")
+    # Reuse Executive logic to derive stages
+    # Qualified: stage 2; Meeting: scheduled/rescheduled; Negotiation: On Hold / Awaiting Budget; Won/Lost as above
+    qualified_ids, meet_leads, nego_ids = set(), set(), set()
+    if statuses is not None and {"leadstageid","leadstatusid"}.issubset(statuses.columns):
+        s = statuses.copy()
+        s["leadstageid"] = pd.to_numeric(s["leadstageid"], errors="coerce").astype("Int64")
+        s["leadstatusid"] = pd.to_numeric(s["leadstatusid"], errors="coerce").astype("Int64")
+        qualified_ids = set(s.loc[s["leadstageid"].eq(2), "leadstatusid"].astype(int).tolist())
+        nego_ids = set(s.loc[s["statusname_e"].str.lower().isin(["on hold","awaiting budget"], na=False), "leadstatusid"].astype(int).tolist())
+
+    new_count = int(L["LeadId"].nunique())
+    qualified_count = int(L.loc[L["LeadStatusId"].isin(qualified_ids), "LeadId"].nunique()) if qualified_ids else 0
+
+    # Meeting scheduled/rescheduled
+    meeting_count = 0
+    if meets is not None and len(meets):
+        M = meets.copy(); M.columns = M.columns.str.lower()
+        if {"leadid"}.issubset(M.columns):
+            if "meetingstatusid" in M.columns:
+                M = M[M["meetingstatusid"].isin({1,6})]
+            meet_leads = set(pd.to_numeric(M["leadid"], errors="coerce").dropna().astype(int).tolist())
+            meeting_count = int(len(meet_leads))
+    nego_count = int(L.loc[L["LeadStatusId"].isin(nego_ids) & L["LeadId"].isin(meet_leads if meet_leads else set()), "LeadId"].nunique()) if nego_ids else 0
+    won_count = wins
+    lost_count = losses
+
+    funnel_df = pd.DataFrame({
+        "Stage":["New","Qualified","Meeting Scheduled","Negotiation","Won","Lost"],
+        "Count":[new_count, qualified_count, meeting_count, nego_count, won_count, lost_count]
+    })
+    fig = px.funnel(funnel_df, x="Count", y="Stage",
+                    color_discrete_sequence=["#1E90FF","#32CD32","#DAA520","#FFA500","#7CFC00","#DC143C"])
+    fig.update_layout(height=340, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white",
+                      margin=dict(l=0, r=0, t=10, b=10))
+    st.plotly_chart(fig, use_container_width=True)
+
 # -----------------------------------------------------------------------------
 # Geo AI page (performance + AI recommendations)
 # -----------------------------------------------------------------------------
@@ -1123,11 +1240,13 @@ if HAS_OPTION_MENU:
     if selected=="Executive": show_executive_summary(fdata)
     elif selected=="Lead Status": show_lead_status(fdata)
     elif selected=="AI Calls": show_calls(fdata)
+    elif selected=="Conversion": show_conversions(fdata)
     elif selected=="AI Insights": show_ai_insights(fdata)
     elif selected=="Geo AI": show_geo_ai(fdata)
 else:
     with tabs[0]: show_executive_summary(fdata)
     with tabs[1]: show_lead_status(fdata)
     with tabs[2]: show_calls(fdata)
-    with tabs[3]: show_ai_insights(fdata)
-    with tabs[4]: show_geo_ai(fdata)
+    with tabs[3]: show_conversions(fdata)
+    with tabs[4]: show_ai_insights(fdata)
+    with tabs[5]: show_geo_ai(fdata)
