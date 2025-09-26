@@ -840,13 +840,13 @@ def show_calls(d):
             donut,
             names="Status",
             values="count",
-            hole=0.45,
+            hole=0.35,
             color_discrete_sequence=px.colors.sequential.RdPu,
             title="Outcomes"
         )
         fig.update_traces(textposition="inside", textinfo="percent+label")  # readable labels
         fig.update_layout(
-            height=520,  # bigger height
+            height=320,  # bigger height
             margin=dict(l=10, r=10, t=60, b=10),
             legend=dict(orientation="h", yanchor="bottom", y=-0.05, xanchor="center", x=0.5),
             font=dict(size=14),
