@@ -846,7 +846,7 @@ def show_calls(d):
         )
         fig.update_traces(textposition="inside", textinfo="percent+label")
         fig.update_layout(
-                height=520,
+                height=500,
                 margin=dict(l=10, r=10, t=60, b=80),   # <- larger bottom margin creates space
                 legend=dict(orientation="h", yanchor="bottom", y=-0.18, xanchor="center", x=0.5),
                 font=dict(size=14),
