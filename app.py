@@ -781,23 +781,162 @@ def show_lead_status(d):
 # Calls page (basic)
 # -----------------------------------------------------------------------------
 def show_calls(d):
-    calls=d.get("calls")
+    st.subheader("AI Call Activity")
+
+    calls = d.get("calls")
     if calls is None or len(calls)==0:
-        st.info("No call data in the selected range."); return
-    if "CallDateTime" in calls.columns:
-        c=calls.copy(); c["CallDateTime"]=pd.to_datetime(c["CallDateTime"], errors="coerce")
-        daily=c.groupby(c["CallDateTime"].dt.date).agg(Total=("LeadCallId","count"), Connected=("CallStatusId", lambda x:(x==1).sum())).reset_index()
-        daily["SuccessRate"]=(daily["Connected"]/daily["Total"]*100).round(1)
-        col1,col2=st.columns(2)
+        st.info("No call data in the selected range.")
+        return
+
+    # Normalize types
+    C = calls.copy()
+    if "CallDateTime" in C.columns:
+        C["CallDateTime"] = pd.to_datetime(C["CallDateTime"], errors="coerce")
+
+    # ---------------- Daily calls and success rate (existing, robust) ----------------
+    if {"CallDateTime","LeadCallId","CallStatusId"}.issubset(C.columns):
+        daily = C.groupby(C["CallDateTime"].dt.date).agg(
+            Total=("LeadCallId","count"),
+            Connected=("CallStatusId", lambda x: (x==1).sum())
+        ).reset_index().rename(columns={"CallDateTime":"Date"})
+        daily["SuccessRate"] = (daily["Connected"]/daily["Total"]*100).round(1)
+
+        col1, col2 = st.columns(2)
         with col1:
-            fig=go.Figure(); fig.add_trace(go.Scatter(x=daily["CallDateTime"], y=daily["Total"], mode="lines+markers", line=dict(color=EXEC_BLUE,width=3)))
-            fig.update_layout(title="Daily Calls", plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white")
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=daily["Date"], y=daily["Total"], mode="lines+markers",
+                                     line=dict(color="#1E90FF", width=3)))
+            fig.update_layout(title="Daily Calls",
+                              plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                              font_color="white")
             st.plotly_chart(fig, use_container_width=True)
         with col2:
-            fig=go.Figure(); fig.add_trace(go.Scatter(x=daily["CallDateTime"], y=daily["SuccessRate"], mode="lines+markers", line=dict(color=EXEC_GREEN,width=3)))
-            fig.update_layout(title="Success Rate (%)", plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white")
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=daily["Date"], y=daily["SuccessRate"], mode="lines+markers",
+                                     line=dict(color="#32CD32", width=3)))
+            fig.update_layout(title="Success Rate (%)",
+                              plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                              font_color="white")
             st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(calls.head(1000), use_container_width=True)
+    else:
+        st.info("Missing fields to plot daily calls or success rate (need CallDateTime, LeadCallId, CallStatusId).")
+
+    # ---------------- Call Status Distribution (donut) ----------------
+    st.markdown("---"); st.subheader("Call Status Distribution")
+    cs = d.get("call_statuses")
+    name_map = {}
+    if cs is not None and {"callstatusid","statusname_e"}.issubset(cs.columns):
+        name_map = dict(zip(cs["callstatusid"].astype(int), cs["statusname_e"].astype(str)))
+    if "CallStatusId" in C.columns:
+        dist = C.copy()
+        dist["Status"] = dist["CallStatusId"].map(name_map).fillna(dist["CallStatusId"].astype(str))
+        donut = dist["Status"].value_counts().reset_index()
+        donut.columns = ["Status","count"]
+        fig = px.pie(donut, names="Status", values="count", hole=0.45,
+                     color_discrete_sequence=px.colors.sequential.RdPu, title="Outcomes")
+        fig.update_layout(height=360, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("CallStatusId not available to render distribution.")
+
+    # ---------------- Connect-rate heatmap (weekday x hour) ----------------
+    st.markdown("---"); st.subheader("Connect-rate heatmap (weekday x hour)")
+    if {"CallDateTime","CallStatusId","LeadCallId"}.issubset(C.columns):
+        H = C.copy()
+        H["dt"] = pd.to_datetime(H["CallDateTime"], errors="coerce")
+        H["dow"] = H["dt"].dt.day_name()
+        H["hour"] = H["dt"].dt.hour
+        grp = H.groupby(["dow","hour"]).agg(
+            total=("LeadCallId","count"),
+            connects=("CallStatusId", lambda s: (s==1).sum())
+        ).reset_index()
+        grp["connect_rate"] = (grp["connects"]/grp["total"]).fillna(0.0).round(3)
+        mat = grp.pivot(index="dow", columns="hour", values="connect_rate").reindex(
+            ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
+        )
+        fig = px.imshow(mat, color_continuous_scale="YlGnBu", origin="lower",
+                        labels=dict(x="Hour", y="Weekday", color="Connect rate"),
+                        title="Connect rate by weekday and hour")
+        fig.update_layout(height=420, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white",
+                          margin=dict(l=0,r=0,t=40,b=0))
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Not enough data to build the heatmap (need CallDateTime, CallStatusId, LeadCallId).")
+
+    # ---------------- Effectiveness by attempt number ----------------
+    st.markdown("---"); st.subheader("Effectiveness by attempt number")
+    if {"LeadId","CallDateTime","CallStatusId","LeadCallId"}.issubset(C.columns):
+        A = C.copy().sort_values(["LeadId","CallDateTime"])
+        A["attempt_no"] = A.groupby("LeadId").cumcount() + 1
+        curve = A.groupby("attempt_no").agg(
+            total=("LeadCallId","count"),
+            connects=("CallStatusId", lambda s: (s==1).sum())
+        ).reset_index()
+        curve["connect_rate"] = (curve["connects"]/curve["total"]).fillna(0.0).round(3)
+        fig = px.line(curve, x="attempt_no", y="connect_rate", markers=True,
+                      title="Connect rate by attempt number")
+        fig.update_layout(height=320, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                          font_color="white", xaxis_title="Attempt #", yaxis_title="Connect rate")
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(curve, use_container_width=True, hide_index=True)
+    else:
+        st.info("Insufficient fields to analyze attempts (need LeadId, CallDateTime, CallStatusId, LeadCallId).")
+
+    # ---------------- Responsiveness and conversion latency ----------------
+    st.markdown("---"); st.subheader("Responsiveness and conversion latency")
+    leads_df = d.get("leads")
+    meets_df = d.get("agent_meeting_assignment")
+
+    # SLA: time to first call from lead creation
+    if leads_df is not None and len(leads_df) and "CreatedOn" in leads_df.columns and "CallDateTime" in C.columns:
+        L = leads_df.copy()
+        L["CreatedOn"] = pd.to_datetime(L["CreatedOn"], errors="coerce")
+        first_call = C.sort_values("CallDateTime").groupby("LeadId")["CallDateTime"].first().rename("FirstCall").reset_index()
+        ttf = L.merge(first_call, on="LeadId", how="left")
+        ttf["mins_to_first_call"] = ((ttf["FirstCall"] - ttf["CreatedOn"]).dt.total_seconds()/60.0).round(1)
+        med_min = float(ttf["mins_to_first_call"].dropna().median()) if ttf["mins_to_first_call"].notna().any() else None
+
+        colA, colB = st.columns(2)
+        with colA:
+            st.metric("Median time to first call (min)", f"{med_min:.1f}" if med_min is not None else "—")
+        with colB:
+            fig = px.histogram(ttf.dropna(subset=["mins_to_first_call"]), x="mins_to_first_call", nbins=30,
+                               title="Distribution: time to first call (minutes)")
+            fig.update_layout(height=260, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white")
+            st.plotly_chart(fig, use_container_width=True)
+
+    # Latency from first CONNECTED call to first scheduled/rescheduled meeting
+    if meets_df is not None and len(meets_df) and {"CallDateTime","CallStatusId"}.issubset(C.columns):
+        C2 = C.copy()
+        first_connected = (C2[C2["CallStatusId"]==1]
+                           .sort_values("CallDateTime")
+                           .groupby("LeadId")["CallDateTime"].first()
+                           .rename("FirstConnected").reset_index())
+
+        M = meets_df.copy(); M.columns = M.columns.str.lower()
+        if "startdatetime" in M.columns:
+            M["startdatetime"] = pd.to_datetime(M["startdatetime"], errors="coerce")
+            if "meetingstatusid" in M.columns:
+                M = M[M["meetingstatusid"].isin({1,6})]  # Scheduled / Rescheduled
+            first_meet = (M.sort_values("startdatetime")
+                            .groupby("leadid")["startdatetime"].first()
+                            .rename("FirstMeeting").reset_index())
+
+            lat = first_connected.merge(first_meet, left_on="LeadId", right_on="leadid", how="inner")
+            if not lat.empty:
+                lat["days_connect_to_meet"] = (lat["FirstMeeting"] - lat["FirstConnected"]).dt.total_seconds()/86400.0
+                med_days = float(pd.to_numeric(lat["days_connect_to_meet"], errors="coerce").dropna().median()) if len(lat) else None
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Median days: connect ➜ meeting", f"{med_days:.1f}" if med_days is not None else "—")
+                with col2:
+                    fig = px.histogram(lat, x="days_connect_to_meet", nbins=24,
+                                       title="Distribution: connect ➜ meeting (days)")
+                    fig.update_layout(height=260, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white")
+                    st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No connected calls matched to scheduled meetings in the selected range.")
+    # end show_calls
 
 # -----------------------------------------------------------------------------
 # Geo AI page (performance + AI recommendations)
