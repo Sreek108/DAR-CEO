@@ -912,10 +912,8 @@ def show_conversions(d):
         s["leadstatusid"] = pd.to_numeric(s["leadstatusid"], errors="coerce").astype("Int64")
         w = s.loc[s["statusname_e_norm"].eq("won"), "leadstatusid"].dropna()
         l = s.loc[s["statusname_e_norm"].eq("lost"), "leadstatusid"].dropna()
-        if not w.empty:
-            won_id = int(w.iloc[0])
-        if not l.empty:
-            lost_id = int(l.iloc[0])
+        if not w.empty: won_id = int(w.iloc[0])
+        if not l.empty: lost_id = int(l.iloc[0])
 
     # ---------- Prepare leads with period ----------
     L = leads.copy()
@@ -927,53 +925,40 @@ def show_conversions(d):
 
     # ---------- Monthly conversions vs dropped ----------
     per_total = L.groupby("period").size().rename("total")
-    per_won = L.loc[L["LeadStatusId"].eq(won_id)].groupby("period").size().rename("won")
-    per_lost = L.loc[L["LeadStatusId"].eq(lost_id)].groupby("period").size().rename("lost")
+    per_won   = L.loc[L["LeadStatusId"].eq(won_id)].groupby("period").size().rename("won")
+    per_lost  = L.loc[L["LeadStatusId"].eq(lost_id)].groupby("period").size().rename("lost")
     conv = pd.concat([per_total, per_won, per_lost], axis=1).fillna(0.0).reset_index()
-    conv["conv_rate"] = (conv["won"] / conv["total"] * 100).round(1)
+    conv["conv_rate"] = (conv["won"]/conv["total"]*100).round(1)
 
     c1, c2 = st.columns(2)
     with c1:
         fig = px.bar(
             conv.sort_values("period"),
-            x="period",
-            y=["won", "lost"],
+            x="period", y=["won","lost"],
             barmode="group",
-            color_discrete_sequence=["#32CD32", "#DC143C"],
+            color_discrete_sequence=["#32CD32","#DC143C"],
             title="Monthly conversions vs dropped"
         )
-        fig.update_layout(
-            height=340,
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-            font_color="white",
-            margin=dict(l=0, r=0, t=40, b=0)
-        )
+        fig.update_layout(height=340, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white",
+                          margin=dict(l=0,r=0,t=40,b=0))
         st.plotly_chart(fig, use_container_width=True)
 
     with c2:
         fig = px.line(
             conv.sort_values("period"),
-            x="period",
-            y="conv_rate",
-            markers=True,
+            x="period", y="conv_rate", markers=True,
             title="Conversion rate trend (%)"
         )
-        fig.update_layout(
-            height=340,
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-            font_color="white",
-            margin=dict(l=0, r=0, t=40, b=0)
-        )
+        fig.update_layout(height=340, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white",
+                          margin=dict(l=0,r=0,t=40,b=0))
         st.plotly_chart(fig, use_container_width=True)
 
     # ---------- KPIs (no revenue/pipeline) ----------
     total = int(L["LeadId"].nunique()) if "LeadId" in L.columns else int(len(L))
     wins = int(L["LeadStatusId"].eq(won_id).sum())
     losses = int(L["LeadStatusId"].eq(lost_id).sum())
-    conv_rate_overall = (wins / total * 100.0) if total else 0.0
-    drop_rate_overall = (losses / total * 100.0) if total else 0.0
+    conv_rate_overall = (wins/total*100.0) if total else 0.0
+    drop_rate_overall = (losses/total*100.0) if total else 0.0
 
     # YTD conversions (based on CreatedOn)
     ytd_wins = 0
@@ -981,52 +966,69 @@ def show_conversions(d):
         dt = pd.to_datetime(L["CreatedOn"], errors="coerce")
         today = pd.Timestamp.today()
         ystart = pd.Timestamp(year=today.year, month=1, day=1)
-        ytd_wins = int(L.loc[(dt >= ystart) & L["LeadStatusId"].eq(won_id)].shape[0])
+        ytd_wins = int(L.loc[(dt>=ystart) & L["LeadStatusId"].eq(won_id)].shape[0])
 
-    k1, k2, k3 = st.columns(3)
-    with k1:
-        st.metric("YTD conversions", f"{ytd_wins:,}")
-    with k2:
-        st.metric("Conversion rate", f"{conv_rate_overall:.1f}%")
-    with k3:
-        st.metric("Drop rate", f"{drop_rate_overall:.1f}%")
+    k1,k2,k3 = st.columns(3)
+    with k1: st.metric("YTD conversions", f"{ytd_wins:,}")
+    with k2: st.metric("Conversion rate", f"{conv_rate_overall:.1f}%")
+    with k3: st.metric("Drop rate", f"{drop_rate_overall:.1f}%")
 
     # ---------- Conversion Funnel (counts only) ----------
-    st.markdown("---")
-    st.subheader("Conversion Funnel (counts)")
+    st.markdown("---"); st.subheader("Conversion Funnel (counts)")
 
-    # Qualified and negotiation ids already computed above...
-    # new_count, qualified_count, meeting_count, nego_count, won_count, lost_count already computed
+    # Qualified: all statuses in stage 2; Negotiation: On Hold/Awaiting Budget
+    qualified_ids, nego_ids = set(), set()
+    if statuses is not None:
+        s = statuses.copy()
+        s["leadstageid"]  = pd.to_numeric(s.get("leadstageid"), errors="coerce").astype("Int64")
+        s["leadstatusid"] = pd.to_numeric(s.get("leadstatusid"), errors="coerce").astype("Int64")
+        s["statusname_e_norm"] = s.get("statusname_e", pd.Series(dtype=object)).astype(str).str.strip().str.lower()
+        qualified_ids = set(s.loc[s["leadstageid"].eq(2), "leadstatusid"].dropna().astype(int).tolist())
+        nego_mask = s["statusname_e_norm"].isin(["on hold","awaiting budget"])
+        nego_ids = set(s.loc[nego_mask, "leadstatusid"].dropna().astype(int).tolist())
+
+    # Initialize all stage counters to ensure no NameError
+    new_count = int(L["LeadId"].nunique())
+    qualified_count = int(L.loc[L["LeadStatusId"].isin(qualified_ids), "LeadId"].nunique()) if qualified_ids else 0
+
+    meet_leads = set()
+    meeting_count = 0
+    if meets is not None and len(meets):
+        M = meets.copy(); M.columns = M.columns.str.lower()
+        if "startdatetime" in M.columns:
+            if "meetingstatusid" in M.columns:
+                M = M[M["meetingstatusid"].isin({1,6})]
+            meet_leads = set(pd.to_numeric(M["leadid"], errors="coerce").dropna().astype(int).tolist())
+            meeting_count = int(len(meet_leads))
+
+    nego_count = int(L.loc[L["LeadStatusId"].isin(nego_ids) & L["LeadId"].isin(meet_leads), "LeadId"].nunique()) if nego_ids else 0
+    won_count  = wins
+    lost_count = losses
 
     funnel_df = pd.DataFrame({
-        "Stage": ["New","Qualified","Meeting Scheduled","Negotiation","Won","Lost"],
-        "Count": [new_count, qualified_count, meeting_count, nego_count, won_count, lost_count]
+        "Stage":["New","Qualified","Meeting Scheduled","Negotiation","Won","Lost"],
+        "Count":[new_count, qualified_count, meeting_count, nego_count, won_count, lost_count]
     })
 
-    # Option: hide zero-count stages to avoid spiky wedges
-    show_zero_stages = False  # set True to keep zeros visible
+    # Optionally filter out zero-count stages to avoid awkward shapes
+    show_zero_stages = False
     if not show_zero_stages:
         funnel_df = funnel_df[funnel_df["Count"]>0]
 
     fig = px.funnel(
-        funnel_df,
-        x="Count",
-        y="Stage",
+        funnel_df, x="Count", y="Stage",
         color_discrete_sequence=["#1E90FF","#32CD32","#DAA520","#FFA500","#7CFC00","#DC143C"],
         title="Conversion Funnel (counts)"
     )
-    # Bigger chart + more whitespace
-    fig.update_traces(textposition="inside", textinfo="value+percent initial")  # clearer labels
+    fig.update_traces(textposition="inside", textinfo="value+percent initial")
     fig.update_layout(
         height=420,
-        margin=dict(l=30, r=30, t=70, b=60),  # add space above/below/left/right
+        margin=dict(l=30, r=30, t=70, b=60),
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
         font_color="white"
     )
     st.plotly_chart(fig, use_container_width=True)
-
-    # Spacer below the funnel so the next section/KPIs don’t crowd it
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
