@@ -793,7 +793,7 @@ def show_calls(d):
     if "CallDateTime" in C.columns:
         C["CallDateTime"] = pd.to_datetime(C["CallDateTime"], errors="coerce")
 
-    # ---------------- Daily calls and success rate (existing, robust) ----------------
+    # ---------------- Daily calls and success rate (existing) ----------------
     if {"CallDateTime","LeadCallId","CallStatusId"}.issubset(C.columns):
         daily = C.groupby(C["CallDateTime"].dt.date).agg(
             Total=("LeadCallId","count"),
@@ -821,12 +821,14 @@ def show_calls(d):
     else:
         st.info("Missing fields to plot daily calls or success rate (need CallDateTime, LeadCallId, CallStatusId).")
 
-    # ---------------- Call Status Distribution (donut) ----------------
+    # ---------------- Call Status Distribution (donut + KPI cards) ----------------
     st.markdown("---"); st.subheader("Call Status Distribution")
+
     cs = d.get("call_statuses")
     name_map = {}
     if cs is not None and {"callstatusid","statusname_e"}.issubset(cs.columns):
         name_map = dict(zip(cs["callstatusid"].astype(int), cs["statusname_e"].astype(str)))
+
     if "CallStatusId" in C.columns:
         dist = C.copy()
         dist["Status"] = dist["CallStatusId"].map(name_map).fillna(dist["CallStatusId"].astype(str))
@@ -836,8 +838,35 @@ def show_calls(d):
                      color_discrete_sequence=px.colors.sequential.RdPu, title="Outcomes")
         fig.update_layout(height=360, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white")
         st.plotly_chart(fig, use_container_width=True)
+
+        # KPI cards (non‑AI, derived from call logs only)
+        total_calls = int(len(C))
+        connected_calls = int((C["CallStatusId"]==1).sum()) if "CallStatusId" in C.columns else 0
+        no_answer_calls = int((C["CallStatusId"]==2).sum()) if "CallStatusId" in C.columns else 0
+        connect_rate = (connected_calls/total_calls*100.0) if total_calls else 0.0
+        no_answer_rate = (no_answer_calls/total_calls*100.0) if total_calls else 0.0
+        avg_duration = float(pd.to_numeric(C.get("DurationSeconds", pd.Series(dtype=float)), errors="coerce").dropna().mean()) if "DurationSeconds" in C.columns else 0.0
+        unique_leads = int(pd.to_numeric(C.get("LeadId", pd.Series(dtype="Int64")), errors="coerce").dropna().nunique()) if "LeadId" in C.columns else 0
+        calls_per_lead = (total_calls/unique_leads) if unique_leads else 0.0
+        leads_connected = int(C.loc[C.get("CallStatusId", pd.Series(dtype=int))==1, "LeadId"].dropna().nunique()) if {"LeadId","CallStatusId"}.issubset(C.columns) else 0
+        lead_connect_rate = (leads_connected/unique_leads*100.0) if unique_leads else 0.0
+
+        k1,k2,k3,k4 = st.columns(4)
+        with k1:
+            st.metric("Total calls", f"{total_calls:,}")
+            st.metric("Unique leads dialed", f"{unique_leads:,}")
+        with k2:
+            st.metric("Connected calls", f"{connected_calls:,}")
+            st.metric("Connect rate", f"{connect_rate:.1f}%")
+        with k3:
+            st.metric("No‑answer calls", f"{no_answer_calls:,}")
+            st.metric("No‑answer rate", f"{no_answer_rate:.1f}%")
+        with k4:
+            st.metric("Avg duration (sec)", f"{avg_duration:.1f}")
+            st.metric("Calls per lead", f"{calls_per_lead:.2f}")
+        st.caption(f"Leads connected: {leads_connected:,}  •  Lead connect rate: {lead_connect_rate:.1f}%")
     else:
-        st.info("CallStatusId not available to render distribution.")
+        st.info("CallStatusId not available to render distribution and KPIs.")
 
     # ---------------- Connect-rate heatmap (weekday x hour) ----------------
     st.markdown("---"); st.subheader("Connect-rate heatmap (weekday x hour)")
@@ -937,6 +966,7 @@ def show_calls(d):
             else:
                 st.info("No connected calls matched to scheduled meetings in the selected range.")
     # end show_calls
+
 
 # -----------------------------------------------------------------------------
 # Geo AI page (performance + AI recommendations)
