@@ -736,8 +736,8 @@ def show_geo_ai(d):
     L["EstimatedBudget"] = pd.to_numeric(L.get("EstimatedBudget"), errors="coerce").fillna(0.0)
     L["CreatedOn"] = pd.to_datetime(L.get("CreatedOn"), errors="coerce")
 
-    # ---------- Section 1: Current market performance ----------
-    # Keep a base copy with CountryId for downstream AI merges
+    # ---------- Section 1: Current market performance (table + map) ----------
+    # Keep a base with CountryId for downstream AI merges
     perf_base = L.groupby("CountryId").agg(
         Leads=("LeadId","count"),
         Pipeline=("EstimatedBudget","sum")
@@ -759,6 +759,55 @@ def show_geo_ai(d):
             "Share": st.column_config.ProgressColumn("Share", min_value=0.0, max_value=100.0, format="%.1f%%")
         }
     )
+
+    # Performance map (choose a metric to color)
+    st.markdown("##### Performance map")
+    perf_metric = st.selectbox(
+        "Color by",
+        ["Pipeline","Leads","Won","Share"],
+        index=0,
+        key="geo_perf_metric"
+    )
+
+    perf_map = perf_view.copy()
+    perf_map[perf_metric] = pd.to_numeric(perf_map[perf_metric], errors="coerce")
+
+    try:
+        if perf_metric == "Share":
+            rng = [0, 100]
+            fig_perf = px.choropleth(
+                perf_map,
+                locations="Country",
+                locationmode="country names",
+                color=perf_metric,
+                hover_name="Country",
+                hover_data={"Leads":":,", "Won":":,", "Pipeline":":,", "Share":".1f"},
+                range_color=rng,
+                color_continuous_scale="Reds",
+                title=f"Current market performance — {perf_metric}"
+            )
+        else:
+            fig_perf = px.choropleth(
+                perf_map,
+                locations="Country",
+                locationmode="country names",
+                color=perf_metric,
+                hover_name="Country",
+                hover_data={"Leads":":,", "Won":":,", "Pipeline":":,", "Share":".1f"},
+                color_continuous_scale="Reds",
+                title=f"Current market performance — {perf_metric}"
+            )
+
+        fig_perf.update_layout(
+            height=420,
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
+            font_color="white",
+            margin=dict(l=0,r=0,t=30,b=0)
+        )
+        st.plotly_chart(fig_perf, use_container_width=True)
+    except Exception:
+        st.info("Map rendering skipped (requires valid country names).")
 
     # ---------- Section 2: Geo AI recommendations ----------
     st.markdown("---")
@@ -786,7 +835,11 @@ def show_geo_ai(d):
         g = C.groupby("CountryId").agg(total=("LeadCallId","count"),
                                        connects=("CallStatusId", lambda s:(s==1).sum())).reset_index()
         g["connect_rate"] = (g["connects"]/g["total"]).fillna(0.0)
-        conn = g[["CountryId","connect_rate"]]
+        conn = g[{"CountryId","connect_rate"}] if isinstance(g, pd.DataFrame) else conn
+
+        # ensure correct cols if set was used mistakenly
+        if isinstance(conn, set) or not isinstance(conn, pd.DataFrame):
+            conn = g[["CountryId","connect_rate"]]
 
     # Momentum (last 4 weeks vs prior 4) — initialize with key
     mom = pd.DataFrame({"CountryId": pd.Series(dtype="Int64"), "momentum": pd.Series(dtype="float")})
@@ -818,7 +871,7 @@ def show_geo_ai(d):
     def mm(s):
         s = s.astype(float)
         lo, hi = s.min(), s.max()
-        if not np.isfinite(lo) or not np.isfinite(hi) or hi==lo: 
+        if not np.isfinite(lo) or not np.isfinite(hi) or hi==lo:
             return pd.Series(0.0, index=s.index)
         return (s-lo)/(hi-lo)
 
@@ -864,7 +917,7 @@ def show_geo_ai(d):
         }
     )
 
-    # Choropleth
+    # Opportunity map
     try:
         fig = px.choropleth(
             view, locations="Country", locationmode="country names",
@@ -876,7 +929,6 @@ def show_geo_ai(d):
         st.plotly_chart(fig, use_container_width=True)
     except Exception:
         st.info("Map rendering skipped (requires valid country names).")
-
 
 # -----------------------------------------------------------------------------
 # Router
