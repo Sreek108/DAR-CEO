@@ -1,4 +1,4 @@
-# app.py — DAR Global CEO Dashboard (with AI/ML Insights)
+# app.py — DAR Global CEO Dashboard (with AI/ML Insights + Geo AI)
 
 import streamlit as st
 import plotly.express as px
@@ -262,7 +262,8 @@ NAV = [
     ("Executive","speedometer2","🎯 Executive Summary"),
     ("Lead Status","people","📈 Lead Status"),
     ("AI Calls","telephone","📞 AI Call Activity"),
-    ("AI Insights","robot","🤖 AI Insights")
+    ("AI Insights","robot","🤖 AI Insights"),
+    ("Geo AI","globe","🌍 Geo AI")  # NEW
 ]
 if HAS_OPTION_MENU:
     selected = option_menu(None, [n[0] for n in NAV], icons=[n[1] for n in NAV], orientation="horizontal", default_index=0,
@@ -648,7 +649,6 @@ def show_ai_insights(d):
             grp = c.groupby(["dow","hour"]).agg(total=("LeadCallId","count"),
                                                connects=("CallStatusId", lambda s:(s==1).sum())).reset_index()
             grp["connect_rate"] = (grp["connects"]/grp["total"]).round(3)
-            # min volume filter for stability
             grp = grp.sort_values(["connect_rate","total"], ascending=[False,False]).head(10)
             st.dataframe(grp, use_container_width=True, hide_index=True)
         else:
@@ -708,6 +708,173 @@ def show_calls(d):
     st.dataframe(calls.head(1000), use_container_width=True)
 
 # -----------------------------------------------------------------------------
+# Geo AI page (performance + AI recommendations)
+# -----------------------------------------------------------------------------
+def show_geo_ai(d):
+    st.subheader("Geo AI — Market performance and opportunity")
+
+    leads = d.get("leads")
+    countries = d.get("countries")
+    statuses = d.get("lead_statuses")
+    calls = d.get("calls")
+    meets = d.get("agent_meeting_assignment")
+
+    if leads is None or len(leads)==0 or countries is None:
+        st.info("No geo data available in the selected range.")
+        return
+
+    # Resolve Won id from master
+    won_id = 9
+    if statuses is not None and "statusname_e" in statuses.columns:
+        m = statuses.loc[statuses["statusname_e"].str.lower()=="won"]
+        if not m.empty and "leadstatusid" in m.columns:
+            won_id = int(m.iloc[0]["leadstatusid"])
+
+    L = leads.copy()
+    L["CountryId"] = pd.to_numeric(L.get("CountryId"), errors="coerce").astype("Int64")
+    L["LeadStatusId"] = pd.to_numeric(L.get("LeadStatusId"), errors="coerce").astype("Int64")
+    L["EstimatedBudget"] = pd.to_numeric(L.get("EstimatedBudget"), errors="coerce").fillna(0.0)
+    L["CreatedOn"] = pd.to_datetime(L.get("CreatedOn"), errors="coerce")
+
+    # Section 1: Current market performance
+    st.markdown("#### Current market performance")
+    perf = L.groupby("CountryId").agg(
+        Leads=("LeadId","count"),
+        Pipeline=("EstimatedBudget","sum")
+    ).reset_index()
+    won = L.loc[L["LeadStatusId"]==won_id].groupby("CountryId").size().reset_index(name="Won")
+    perf = perf.merge(won, on="CountryId", how="left").fillna({"Won":0})
+    total_pipe = float(perf["Pipeline"].sum())
+    perf["Share"] = (perf["Pipeline"]/total_pipe*100.0).round(1) if total_pipe>0 else 0.0
+
+    CTRY = countries.rename(columns={"countryid":"CountryId","countryname_e":"Country"})
+    perf = perf.merge(CTRY[["CountryId","Country"]], on="CountryId", how="left") \
+               .sort_values(["Pipeline","Won","Leads"], ascending=False)[["Country","Leads","Won","Pipeline","Share"]]
+
+    st.dataframe(
+        perf, use_container_width=True, hide_index=True,
+        column_config={
+            "Pipeline": st.column_config.NumberColumn("Pipeline", format="%.0f"),
+            "Share": st.column_config.ProgressColumn("Share", min_value=0.0, max_value=100.0, format="%.1f%%")
+        }
+    )
+
+    # Section 2: Geo AI recommendations
+    st.markdown("---")
+    st.markdown("#### Country opportunity (AI)")
+
+    # Meeting intent
+    meet_rate = pd.DataFrame({"CountryId":[], "meet_rate":[]})
+    if meets is not None and len(meets):
+        M = meets.copy(); M.columns = M.columns.str.lower()
+        dtc = "startdatetime" if "startdatetime" in M.columns else None
+        if dtc is not None:
+            if "meetingstatusid" in M.columns: M = M[M["meetingstatusid"].isin({1,6})]
+            mm = M.merge(L[["LeadId","CountryId"]], left_on="leadid", right_on="LeadId", how="left")
+            mr = mm.groupby("CountryId")["leadid"].nunique().reset_index(name="meet_leads")
+            meet_rate = perf[["CountryId","Leads"]].merge(mr, on="CountryId", how="left").fillna({"meet_leads":0})
+            meet_rate["meet_rate"] = (meet_rate["meet_leads"]/meet_rate["Leads"]).fillna(0.0)
+            meet_rate = meet_rate[["CountryId","meet_rate"]]
+
+    # Connect efficiency
+    conn = pd.DataFrame({"CountryId":[], "connect_rate":[]})
+    if calls is not None and len(calls):
+        C = calls.copy()
+        C["CallDateTime"] = pd.to_datetime(C.get("CallDateTime"), errors="coerce")
+        C = C.merge(L[["LeadId","CountryId"]], on="LeadId", how="left")
+        g = C.groupby("CountryId").agg(total=("LeadCallId","count"),
+                                       connects=("CallStatusId", lambda s:(s==1).sum())).reset_index()
+        g["connect_rate"] = (g["connects"]/g["total"]).fillna(0.0)
+        conn = g[["CountryId","connect_rate"]]
+
+    # Momentum: last 4 weeks vs prior 4 weeks
+    mom = pd.DataFrame({"CountryId":[], "momentum":[]})
+    if "CreatedOn" in L.columns:
+        W = L.copy()
+        W["week"] = W["CreatedOn"].dt.to_period("W").apply(lambda p: p.start_time.date())
+        wk = sorted(W["week"].dropna().unique())
+        if len(wk)>=8:
+            last4 = set(wk[-4:]); prev4 = set(wk[-8:-4])
+            a = W[W["week"].isin(last4)].groupby("CountryId").size().reset_index(name="leads_last4")
+            b = W[W["week"].isin(prev4)].groupby("CountryId").size().reset_index(name="leads_prev4")
+            mom = a.merge(b, on="CountryId", how="outer").fillna(0)
+            mom["momentum"] = (mom["leads_last4"] - mom["leads_prev4"]) / mom["leads_prev4"].replace(0, np.nan)
+            mom["momentum"] = mom["momentum"].replace([np.inf,-np.inf], 0).fillna(0.0)
+            mom = mom[["CountryId","momentum"]]
+        else:
+            tmp = W.groupby("CountryId").size().reset_index(name="leads_last")
+            tmp["momentum"] = 0.0
+            mom = tmp[["CountryId","momentum"]]
+
+    # Combine features
+    df = perf.merge(meet_rate, on="CountryId", how="left") \
+             .merge(conn, on="CountryId", how="left") \
+             .merge(mom, on="CountryId", how="left") \
+             .fillna({"meet_rate":0.0,"connect_rate":0.0,"momentum":0.0})
+    df["win_rate"] = (df["Won"]/df["Leads"]).fillna(0.0)
+
+    # Normalize + score
+    def mm(s):
+        s = s.astype(float); lo, hi = s.min(), s.max()
+        if hi==lo: return pd.Series(0.0, index=s.index)
+        return (s-lo)/(hi-lo)
+
+    total_pipe = float(df["Pipeline"].sum())
+    df["pipeline_share"] = df["Pipeline"]/total_pipe if total_pipe>0 else 0.0
+
+    w = {"win_rate":0.35,"pipeline_share":0.30,"momentum":0.20,"connect_rate":0.10,"meet_rate":0.05}
+    df["opportunity_score"] = (
+        w["win_rate"]*mm(df["win_rate"]) +
+        w["pipeline_share"]*mm(df["pipeline_share"]) +
+        w["momentum"]*mm(df["momentum"]) +
+        w["connect_rate"]*mm(df["connect_rate"]) +
+        w["meet_rate"]*mm(df["meet_rate"])
+    ).round(3)
+
+    q75, q50 = df["opportunity_score"].quantile(0.75), df["opportunity_score"].quantile(0.50)
+    def reco(r):
+        if r["opportunity_score"]>=q75 and r["win_rate"]>=df["win_rate"].median(): return "Invest"
+        if r["opportunity_score"]>=q50: return "Protect"
+        if r["momentum"]>0: return "Explore"
+        return "Deprioritize"
+    df["recommendation"] = df.apply(reco, axis=1)
+
+    def action(r):
+        if r["recommendation"]=="Invest": return "Add senior closer capacity; accelerate meetings; allocate budget"
+        if r["recommendation"]=="Protect": return "Maintain capacity; tighten SLA; defend share"
+        if r["recommendation"]=="Explore": return "Low‑cost tests, partner outreach, targeted campaigns"
+        return "Reduce spend; nurture via AI agent only"
+    df["action"] = df.apply(action, axis=1)
+
+    view = df.merge(CTRY[["CountryId","Country"]], on="CountryId", how="left") \
+             .sort_values(["opportunity_score","Pipeline","Won"], ascending=False)
+
+    st.dataframe(
+        view[["Country","Leads","Won","win_rate","meet_rate","connect_rate","Pipeline","opportunity_score","recommendation","action"]],
+        use_container_width=True, hide_index=True,
+        column_config={
+            "win_rate": st.column_config.NumberColumn("Win rate", format="%.1f"),
+            "meet_rate": st.column_config.NumberColumn("Meet rate", format="%.1f"),
+            "connect_rate": st.column_config.NumberColumn("Connect rate", format="%.1f"),
+            "Pipeline": st.column_config.NumberColumn("Pipeline", format="%.0f"),
+            "opportunity_score": st.column_config.ProgressColumn("Opportunity", min_value=0.0, max_value=1.0, format="%.3f"),
+        }
+    )
+
+    # Choropleth
+    try:
+        fig = px.choropleth(
+            view, locations="Country", locationmode="country names",
+            color="opportunity_score", hover_name="Country",
+            color_continuous_scale="YlGnBu", title="Country opportunity map"
+        )
+        fig.update_layout(height=420, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white",
+                          margin=dict(l=0,r=0,t=30,b=0))
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception:
+        st.info("Map rendering skipped (requires valid country names).")
+
+# -----------------------------------------------------------------------------
 # Router
 # -----------------------------------------------------------------------------
 if HAS_OPTION_MENU:
@@ -715,8 +882,10 @@ if HAS_OPTION_MENU:
     elif selected=="Lead Status": show_lead_status(fdata)
     elif selected=="AI Calls": show_calls(fdata)
     elif selected=="AI Insights": show_ai_insights(fdata)
+    elif selected=="Geo AI": show_geo_ai(fdata)
 else:
     with tabs[0]: show_executive_summary(fdata)
     with tabs[1]: show_lead_status(fdata)
     with tabs[2]: show_calls(fdata)
     with tabs[3]: show_ai_insights(fdata)
+    with tabs[4]: show_geo_ai(fdata)
