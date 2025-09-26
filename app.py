@@ -847,7 +847,7 @@ def show_calls(d):
         fig.update_traces(textposition="inside", textinfo="percent+label")  # readable labels
         fig.update_layout(
             height=320,  # bigger height
-            margin=dict(l=20, r=20, t=70, b=20),
+            margin=dict(l=20, r=20, t=70, b=90),
             legend=dict(orientation="h", yanchor="bottom", y=-0.05, xanchor="center", x=0.5),
             font=dict(size=14),
             plot_bgcolor="rgba(0,0,0,0)",
