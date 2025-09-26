@@ -51,7 +51,7 @@ div[data-testid="metric-container"] {{
 }}
 .section {{
     background: linear-gradient(135deg, {EXEC_SURFACE} 0%, {EXEC_BG} 100%);
-    padding: 18px; border-radius: 10px; border: 1px solid #444;
+    padding: 10px; border-radius: 6px; border: 1px solid #444;
 }}
 </style>
 """, unsafe_allow_html=True)
