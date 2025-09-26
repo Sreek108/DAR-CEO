@@ -736,35 +736,36 @@ def show_geo_ai(d):
     L["EstimatedBudget"] = pd.to_numeric(L.get("EstimatedBudget"), errors="coerce").fillna(0.0)
     L["CreatedOn"] = pd.to_datetime(L.get("CreatedOn"), errors="coerce")
 
-    # Section 1: Current market performance
-    st.markdown("#### Current market performance")
-    perf = L.groupby("CountryId").agg(
+    # ---------- Section 1: Current market performance ----------
+    # Keep a base copy with CountryId for downstream AI merges
+    perf_base = L.groupby("CountryId").agg(
         Leads=("LeadId","count"),
         Pipeline=("EstimatedBudget","sum")
     ).reset_index()
     won = L.loc[L["LeadStatusId"]==won_id].groupby("CountryId").size().reset_index(name="Won")
-    perf = perf.merge(won, on="CountryId", how="left").fillna({"Won":0})
-    total_pipe = float(perf["Pipeline"].sum())
-    perf["Share"] = (perf["Pipeline"]/total_pipe*100.0).round(1) if total_pipe>0 else 0.0
+    perf_base = perf_base.merge(won, on="CountryId", how="left").fillna({"Won":0})
+    total_pipe = float(perf_base["Pipeline"].sum())
+    perf_base["Share"] = (perf_base["Pipeline"]/total_pipe*100.0).round(1) if total_pipe>0 else 0.0
 
     CTRY = countries.rename(columns={"countryid":"CountryId","countryname_e":"Country"})
-    perf = perf.merge(CTRY[["CountryId","Country"]], on="CountryId", how="left") \
-               .sort_values(["Pipeline","Won","Leads"], ascending=False)[["Country","Leads","Won","Pipeline","Share"]]
+    perf_view = perf_base.merge(CTRY[["CountryId","Country"]], on="CountryId", how="left") \
+                         .sort_values(["Pipeline","Won","Leads"], ascending=False)[["Country","Leads","Won","Pipeline","Share"]]
 
+    st.markdown("#### Current market performance")
     st.dataframe(
-        perf, use_container_width=True, hide_index=True,
+        perf_view, use_container_width=True, hide_index=True,
         column_config={
             "Pipeline": st.column_config.NumberColumn("Pipeline", format="%.0f"),
             "Share": st.column_config.ProgressColumn("Share", min_value=0.0, max_value=100.0, format="%.1f%%")
         }
     )
 
-    # Section 2: Geo AI recommendations
+    # ---------- Section 2: Geo AI recommendations ----------
     st.markdown("---")
     st.markdown("#### Country opportunity (AI)")
 
-    # Meeting intent
-    meet_rate = pd.DataFrame({"CountryId":[], "meet_rate":[]})
+    # Meeting intent (Scheduled/Rescheduled) — initialize with key to avoid KeyError
+    meet_rate = pd.DataFrame({"CountryId": pd.Series(dtype="Int64"), "meet_rate": pd.Series(dtype="float")})
     if meets is not None and len(meets):
         M = meets.copy(); M.columns = M.columns.str.lower()
         dtc = "startdatetime" if "startdatetime" in M.columns else None
@@ -772,12 +773,12 @@ def show_geo_ai(d):
             if "meetingstatusid" in M.columns: M = M[M["meetingstatusid"].isin({1,6})]
             mm = M.merge(L[["LeadId","CountryId"]], left_on="leadid", right_on="LeadId", how="left")
             mr = mm.groupby("CountryId")["leadid"].nunique().reset_index(name="meet_leads")
-            meet_rate = perf[["CountryId","Leads"]].merge(mr, on="CountryId", how="left").fillna({"meet_leads":0})
+            meet_rate = perf_base[["CountryId","Leads"]].merge(mr, on="CountryId", how="left").fillna({"meet_leads":0})
             meet_rate["meet_rate"] = (meet_rate["meet_leads"]/meet_rate["Leads"]).fillna(0.0)
             meet_rate = meet_rate[["CountryId","meet_rate"]]
 
-    # Connect efficiency
-    conn = pd.DataFrame({"CountryId":[], "connect_rate":[]})
+    # Connect efficiency — initialize with key
+    conn = pd.DataFrame({"CountryId": pd.Series(dtype="Int64"), "connect_rate": pd.Series(dtype="float")})
     if calls is not None and len(calls):
         C = calls.copy()
         C["CallDateTime"] = pd.to_datetime(C.get("CallDateTime"), errors="coerce")
@@ -787,9 +788,9 @@ def show_geo_ai(d):
         g["connect_rate"] = (g["connects"]/g["total"]).fillna(0.0)
         conn = g[["CountryId","connect_rate"]]
 
-    # Momentum: last 4 weeks vs prior 4 weeks
-    mom = pd.DataFrame({"CountryId":[], "momentum":[]})
-    if "CreatedOn" in L.columns:
+    # Momentum (last 4 weeks vs prior 4) — initialize with key
+    mom = pd.DataFrame({"CountryId": pd.Series(dtype="Int64"), "momentum": pd.Series(dtype="float")})
+    if "CreatedOn" in L.columns and L["CreatedOn"].notna().any():
         W = L.copy()
         W["week"] = W["CreatedOn"].dt.to_period("W").apply(lambda p: p.start_time.date())
         wk = sorted(W["week"].dropna().unique())
@@ -806,17 +807,19 @@ def show_geo_ai(d):
             tmp["momentum"] = 0.0
             mom = tmp[["CountryId","momentum"]]
 
-    # Combine features
-    df = perf.merge(meet_rate, on="CountryId", how="left") \
-             .merge(conn, on="CountryId", how="left") \
-             .merge(mom, on="CountryId", how="left") \
-             .fillna({"meet_rate":0.0,"connect_rate":0.0,"momentum":0.0})
+    # Combine features on CountryId (safe merges even when frames are empty)
+    df = perf_base.merge(meet_rate, on="CountryId", how="left") \
+                  .merge(conn, on="CountryId", how="left") \
+                  .merge(mom, on="CountryId", how="left") \
+                  .fillna({"meet_rate":0.0,"connect_rate":0.0,"momentum":0.0})
     df["win_rate"] = (df["Won"]/df["Leads"]).fillna(0.0)
 
     # Normalize + score
     def mm(s):
-        s = s.astype(float); lo, hi = s.min(), s.max()
-        if hi==lo: return pd.Series(0.0, index=s.index)
+        s = s.astype(float)
+        lo, hi = s.min(), s.max()
+        if not np.isfinite(lo) or not np.isfinite(hi) or hi==lo: 
+            return pd.Series(0.0, index=s.index)
         return (s-lo)/(hi-lo)
 
     total_pipe = float(df["Pipeline"].sum())
@@ -873,6 +876,7 @@ def show_geo_ai(d):
         st.plotly_chart(fig, use_container_width=True)
     except Exception:
         st.info("Map rendering skipped (requires valid country names).")
+
 
 # -----------------------------------------------------------------------------
 # Router
