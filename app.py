@@ -28,7 +28,7 @@ except Exception:
 # -----------------------------------------------------------------------------
 # Page config and theme
 # -----------------------------------------------------------------------------
-st.set_page_config(page_title="DAR Global - Executive Dashboard", page_icon="🏗️", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="DAR Global - Executive Dashboard", layout="wide", initial_sidebar_state="expanded")
 
 EXEC_PRIMARY="#DAA520"; EXEC_BLUE="#1E90FF"; EXEC_GREEN="#32CD32"; EXEC_DANGER="#DC143C"; EXEC_BG="#1a1a1a"; EXEC_SURFACE="#2d2d2d"
 
@@ -224,7 +224,7 @@ st.markdown(f"""
   <h3>AI‑Powered Analytics</h3>
   <p style="margin: 6px 0 0 0; color: {EXEC_GREEN};">Last Updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</p>
 </div>
-""", unsafe_allow_html=True)
+""", unsafe_allow_html=False)
 
 # -----------------------------------------------------------------------------
 # Sidebar filters
