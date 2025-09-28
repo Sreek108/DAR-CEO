@@ -45,10 +45,10 @@ st.markdown(f"""
 
 /* Use full width and reduce default Streamlit paddings */
 section.main > div.block-container {{
-  padding-left: 0.5rem !important;
-  padding-right: 0.5rem !important;
-  padding-top: 0.5rem !important;
-  padding-bottom: 0.5rem !important;
+  padding-left: 0.2rem !important;
+  padding-right: 0.2rem !important;
+  padding-top: 0.2rem !important;
+  padding-bottom: 0.2rem !important;
   max-width: 100% !important;
 }}
 
