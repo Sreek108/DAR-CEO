@@ -50,10 +50,10 @@ st.markdown(f"""
 
 /* Full-width and trimmed paddings */
 section.main > div.block-container {{
-  padding-left: 0.2rem !important;
+  padding-left: 0.1rem !important;
   padding-right: 0.2rem !important;
-  padding-top: 0.25rem !important;
-  padding-bottom: 0.25rem !important;
+  padding-top: 0.1rem !important;
+  padding-bottom: 0.1rem !important;
   max-width: 100% !important;
 }}
 
@@ -65,13 +65,13 @@ div[role="tablist"] {{
 }}
 div[role="tablist"] > div,
 div[role="tablist"] > button {{
-  font-size: 16px !important;
+  font-size: 30px !important;
   line-height: 36px !important;
   padding: 6px 14px !important;
 }}
 div[role="tablist"] button[aria-selected="true"],
 div[role="tab"][aria-selected="true"] {{
-  border-bottom: 3px solid {EXEC_PRIMARY} !important;
+  border-bottom: 1px solid {EXEC_PRIMARY} !important;
 }}
 
 /* Remove Streamlit top headroom */
