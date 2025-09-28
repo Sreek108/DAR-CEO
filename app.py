@@ -26,67 +26,55 @@ except Exception:
     SKLEARN_OK = False
 
 # -----------------------------------------------------------------------------
-# Page config and theme
-# -----------------------------------------------------------------------------
-st.set_page_config(page_title="DAR Global - Executive Dashboard", layout="wide", initial_sidebar_state="expanded")
-
-EXEC_PRIMARY="#DAA520"; EXEC_BLUE="#1E90FF"; EXEC_GREEN="#32CD32"; EXEC_DANGER="#DC143C"; EXEC_BG="#1a1a1a"; EXEC_SURFACE="#2d2d2d"
-
 st.markdown(f"""
 <style>
-/* Theme colors */
+/* Theme colors pulled from Python vars */
 :root {{
-  --exec-bg: #1a1a1a;
-  --exec-surface: #2d2d2d;
-  --exec-primary: #DAA520;
-  --exec-blue: #1E90FF;
-  --exec-green: #32CD32;
+  --exec-bg: {EXEC_BG};
+  --exec-surface: {EXEC_SURFACE};
+  --exec-primary: {EXEC_PRIMARY};
+  --exec-blue: {EXEC_BLUE};
+  --exec-green: {EXEC_GREEN};
 }}
 
-/* Use full width and reduce default Streamlit paddings */
+/* Use full width and trim default paddings */
 section.main > div.block-container {{
   padding-left: 0.2rem !important;
   padding-right: 0.2rem !important;
-  padding-top: 0.2rem !important;
-  padding-bottom: 0.2rem !important;
+  padding-top: 0.25rem !important;
+  padding-bottom: 0.25rem !important;
   max-width: 100% !important;
 }}
 
-/* Make navigation bar bigger (streamlit-option-menu) */
-div.css-1cbp2wh.e1fqkh3o3,  /* container (older class fallback) */
-div[role="tablist"] {        /* generic tablist selector */
+/* Bigger horizontal navigation (streamlit-option-menu/tablist) */
+div[role="tablist"] {{
   padding-top: 2px !important;
   padding-bottom: 2px !important;
-}
+  gap: 6px !important;
+}}
+div[role="tablist"] > div,
+div[role="tablist"] > button {{
+  font-size: 16px !important;      /* larger text */
+  line-height: 36px !important;    /* taller tabs */
+  padding: 6px 14px !important;    /* bigger hit area */
+}}
+/* Selected tab accent (uses theme color) */
+div[role="tablist"] button[aria-selected="true"],
+div[role="tab"][aria-selected="true"] {{
+  border-bottom: 3px solid {EXEC_PRIMARY} !important;
+}}
 
-div[role="tablist"] > div {  /* each tab */
-  font-size: 16px !important;         /* larger text */
-  line-height: 36px !important;       /* taller tab height */
-  padding: 6px 14px !important;       /* bigger hit area */
-}
-
-/* underline accent for selected tab */
-div[role="tablist"] button[aria-selected="true"], 
-div[role="tab"][aria-selected="true"] {
-  border-bottom: 3px solid #DAA520 !important;   /* thicker underline */
-}
-
-/* 2) Reduce overall top headroom */
-section.main > div.block-container {
-  padding-top: 0.25rem !important;               /* cut top padding */
-}
-
-/* remove extra Streamlit header gap */
-header[data-testid="stHeader"] {
+/* Remove extra Streamlit header gap */
+header[data-testid="stHeader"] {{
   height: 0 !important; padding: 0 !important; margin: 0 !important; background: transparent !important;
-}
+}}
 
-/* keep small space under nav then content */
-div[role="tablist"] { margin-bottom: 6px !important; }
+/* Keep small space under nav then content */
+div[role="tablist"] {{ margin-bottom: 6px !important; }}
 
-/* optional: compress the page title/subheaders */
-h1, .stMarkdown h1 { margin-top: 2px !important; margin-bottom: 6px !important; }
-h2, .stMarkdown h2 { margin-top: 2px !important; margin-bottom: 6px !important; }
+/* Compact page titles */
+h1, .stMarkdown h1 {{ margin-top: 2px !important; margin-bottom: 6px !important; }}
+h2, .stMarkdown h2 {{ margin-top: 2px !important; margin-bottom: 6px !important; }}
 
 /* Metric cards */
 div[data-testid="metric-container"] {{
@@ -110,24 +98,16 @@ div[data-testid="metric-container"] {{
   padding: 10px; border-radius: 6px; border: 1px solid #444;
 }}
 
-/* Reduce space above Streamlit’s top header area */
-header[data-testid="stHeader"] {{
-  height: 0 !important; padding: 0 !important; background: transparent !important;
-}}
-
-/* Tighten tab strip and dividers */
-div[role="tablist"] {{ margin-top: 6px !important; margin-bottom: 6px !important; }}
+/* Tighten dividers and top-of-page spacing */
 hr {{ margin: 6px 0 !important; }}
-
-/* Keep the first content block close to the header */
 [data-testid="stVerticalBlock"] > div:has(.main-header) + div {{ margin-top: 6px !important; }}
 
-/* Tables and charts minimal spacing */
+/* Tables and charts spacing */
 [data-testid="stDataFrame"] {{ margin-top: 6px !important; }}
 .element-container:has(.plotly) {{ margin-top: 6px !important; }}
 
-/* Legends wrap horizontally with less footprint */
-g.legend {{ transform: translate(0, -10px); }}  /* small nudge upward */
+/* Legend nudge */
+g.legend {{ transform: translate(0, -10px); }}
 </style>
 """, unsafe_allow_html=True)
 # -----------------------------------------------------------------------------
