@@ -52,6 +52,41 @@ section.main > div.block-container {{
   max-width: 100% !important;
 }}
 
+/* Make navigation bar bigger (streamlit-option-menu) */
+div.css-1cbp2wh.e1fqkh3o3,  /* container (older class fallback) */
+div[role="tablist"] {        /* generic tablist selector */
+  padding-top: 2px !important;
+  padding-bottom: 2px !important;
+}
+
+div[role="tablist"] > div {  /* each tab */
+  font-size: 16px !important;         /* larger text */
+  line-height: 36px !important;       /* taller tab height */
+  padding: 6px 14px !important;       /* bigger hit area */
+}
+
+/* underline accent for selected tab */
+div[role="tablist"] button[aria-selected="true"], 
+div[role="tab"][aria-selected="true"] {
+  border-bottom: 3px solid #DAA520 !important;   /* thicker underline */
+}
+
+/* 2) Reduce overall top headroom */
+section.main > div.block-container {
+  padding-top: 0.25rem !important;               /* cut top padding */
+}
+
+/* remove extra Streamlit header gap */
+header[data-testid="stHeader"] {
+  height: 0 !important; padding: 0 !important; margin: 0 !important; background: transparent !important;
+}
+
+/* keep small space under nav then content */
+div[role="tablist"] { margin-bottom: 6px !important; }
+
+/* optional: compress the page title/subheaders */
+h1, .stMarkdown h1 { margin-top: 2px !important; margin-bottom: 6px !important; }
+h2, .stMarkdown h2 { margin-top: 2px !important; margin-bottom: 6px !important; }
 
 /* Metric cards */
 div[data-testid="metric-container"] {{
