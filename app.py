@@ -314,8 +314,8 @@ NAV = [
 if HAS_OPTION_MENU:
     selected = option_menu(None, [n[0] for n in NAV], icons=[n[1] for n in NAV], orientation="horizontal", default_index=0,
                            styles={"container":{"padding":"0!important","background-color":"#0f1116"},
-                                   "icon":{"color":EXEC_PRIMARY,"font-size":"16px"},
-                                   "nav-link":{"font-size":"14px","color":"#d0d0d0","--hover-color":"#21252b"},
+                                   "icon":{"color":EXEC_PRIMARY,"font-size":"20px"},
+                                   "nav-link":{"font-size":"18px","color":"#d0d0d0","--hover-color":"#21252b"},
                                    "nav-link-selected":{"background-color":EXEC_SURFACE}})
 else:
     tabs = st.tabs([n[2] for n in NAV])
