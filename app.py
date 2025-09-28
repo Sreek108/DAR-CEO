@@ -218,13 +218,6 @@ def load_data(data_dir="data"):
 # -----------------------------------------------------------------------------
 # Header
 # -----------------------------------------------------------------------------
-st.markdown(f"""
-<div class="main-header">
-  <h1> DAR Global — Executive Dashboard</h1>
-  <h3>AI‑Powered Analytics</h3>
-  <p style="margin: 6px 0 0 0; color: {EXEC_GREEN};">Last Updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</p>
-</div>
-""", unsafe_allow_html=False)
 
 # -----------------------------------------------------------------------------
 # Sidebar filters
