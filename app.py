@@ -26,9 +26,20 @@ except Exception:
     SKLEARN_OK = False
 
 # -----------------------------------------------------------------------------
+# Page config and theme
+st.set_page_config(page_title="DAR Global - Executive Dashboard", layout="wide", initial_sidebar_state="expanded")
+
+# Define theme variables BEFORE CSS
+EXEC_PRIMARY = "#DAA520"
+EXEC_BLUE    = "#1E90FF"
+EXEC_GREEN   = "#32CD32"
+EXEC_DANGER  = "#DC143C"
+EXEC_BG      = "#1a1a1a"
+EXEC_SURFACE = "#2d2d2d"
+
+# CSS (f-string with escaped braces)
 st.markdown(f"""
 <style>
-/* Theme colors pulled from Python vars */
 :root {{
   --exec-bg: {EXEC_BG};
   --exec-surface: {EXEC_SURFACE};
@@ -37,7 +48,7 @@ st.markdown(f"""
   --exec-green: {EXEC_GREEN};
 }}
 
-/* Use full width and trim default paddings */
+/* Full-width and trimmed paddings */
 section.main > div.block-container {{
   padding-left: 0.2rem !important;
   padding-right: 0.2rem !important;
@@ -46,7 +57,7 @@ section.main > div.block-container {{
   max-width: 100% !important;
 }}
 
-/* Bigger horizontal navigation (streamlit-option-menu/tablist) */
+/* Bigger navigation bar */
 div[role="tablist"] {{
   padding-top: 2px !important;
   padding-bottom: 2px !important;
@@ -54,25 +65,22 @@ div[role="tablist"] {{
 }}
 div[role="tablist"] > div,
 div[role="tablist"] > button {{
-  font-size: 16px !important;      /* larger text */
-  line-height: 36px !important;    /* taller tabs */
-  padding: 6px 14px !important;    /* bigger hit area */
+  font-size: 16px !important;
+  line-height: 36px !important;
+  padding: 6px 14px !important;
 }}
-/* Selected tab accent (uses theme color) */
 div[role="tablist"] button[aria-selected="true"],
 div[role="tab"][aria-selected="true"] {{
   border-bottom: 3px solid {EXEC_PRIMARY} !important;
 }}
 
-/* Remove extra Streamlit header gap */
+/* Remove Streamlit top headroom */
 header[data-testid="stHeader"] {{
   height: 0 !important; padding: 0 !important; margin: 0 !important; background: transparent !important;
 }}
-
-/* Keep small space under nav then content */
 div[role="tablist"] {{ margin-bottom: 6px !important; }}
 
-/* Compact page titles */
+/* Compact headings */
 h1, .stMarkdown h1 {{ margin-top: 2px !important; margin-bottom: 6px !important; }}
 h2, .stMarkdown h2 {{ margin-top: 2px !important; margin-bottom: 6px !important; }}
 
@@ -92,17 +100,15 @@ div[data-testid="metric-container"] {{
   border-left: 5px solid var(--exec-green); color: white;
 }}
 
-/* Generic section wrapper */
+/* Section wrapper */
 .section {{
   background: linear-gradient(135deg, var(--exec-surface) 0%, var(--exec-bg) 100%);
   padding: 10px; border-radius: 6px; border: 1px solid #444;
 }}
 
-/* Tighten dividers and top-of-page spacing */
+/* Dividers and element spacing */
 hr {{ margin: 6px 0 !important; }}
 [data-testid="stVerticalBlock"] > div:has(.main-header) + div {{ margin-top: 6px !important; }}
-
-/* Tables and charts spacing */
 [data-testid="stDataFrame"] {{ margin-top: 6px !important; }}
 .element-container:has(.plotly) {{ margin-top: 6px !important; }}
 
