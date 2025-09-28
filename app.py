@@ -34,28 +34,80 @@ EXEC_PRIMARY="#DAA520"; EXEC_BLUE="#1E90FF"; EXEC_GREEN="#32CD32"; EXEC_DANGER="
 
 st.markdown(f"""
 <style>
+/* Theme colors */
+:root {{
+  --exec-bg: #1a1a1a;
+  --exec-surface: #2d2d2d;
+  --exec-primary: #DAA520;
+  --exec-blue: #1E90FF;
+  --exec-green: #32CD32;
+}}
+
+/* Use full width and reduce default Streamlit paddings */
+section.main > div.block-container {{
+  padding-left: 0.5rem !important;
+  padding-right: 0.5rem !important;
+  padding-top: 0.5rem !important;
+  padding-bottom: 0.5rem !important;
+  max-width: 100% !important;
+}}
+
+/* Header card */
 .main-header {{
-    background: linear-gradient(135deg, {EXEC_BG} 0%, {EXEC_SURFACE} 100%);
-    color: {EXEC_PRIMARY}; padding: 24px; border-radius: 12px; border: 2px solid {EXEC_PRIMARY};
-    text-align: center; box-shadow: 0 8px 16px rgba(0,0,0,.35);
+  background: linear-gradient(135deg, var(--exec-bg) 0%, var(--exec-surface) 100%);
+  color: var(--exec-primary);
+  padding: 12px 16px !important;       /* tighter padding */
+  border-radius: 12px;
+  border: 1.5px solid var(--exec-primary);
+  text-align: center;
+  box-shadow: 0 8px 16px rgba(0,0,0,.35);
+  margin: 0 !important;                 /* remove outer margin */
 }}
-.main-header h1 {{ color: {EXEC_PRIMARY}; margin: 0 0 6px 0; }}
-.main-header h3 {{ color: {EXEC_BLUE}; margin: 4px 0 0 0; }}
+.main-header h1 {{ color: var(--exec-primary); margin: 0 0 2px 0 !important; }}
+.main-header h3 {{ color: var(--exec-blue); margin: 0 !important; }}
+
+/* Metric cards */
 div[data-testid="metric-container"] {{
-    background: linear-gradient(135deg, {EXEC_SURFACE} 0%, {EXEC_BG} 100%);
-    border: 2px solid {EXEC_PRIMARY}; padding: .75rem; border-radius: 10px; color: white;
+  background: linear-gradient(135deg, var(--exec-surface) 0%, var(--exec-bg) 100%);
+  border: 2px solid var(--exec-primary);
+  padding: .65rem;
+  border-radius: 10px;
+  color: white;
 }}
+
+/* Insight callouts */
 .insight-box {{
-    background: linear-gradient(135deg, {EXEC_SURFACE} 0%, {EXEC_BG} 100%);
-    padding: 18px; border-radius: 10px; border-left: 5px solid {EXEC_GREEN}; color: white;
+  background: linear-gradient(135deg, var(--exec-surface) 0%, var(--exec-bg) 100%);
+  padding: 14px; border-radius: 10px;
+  border-left: 5px solid var(--exec-green); color: white;
 }}
+
+/* Generic section wrapper */
 .section {{
-    background: linear-gradient(135deg, {EXEC_SURFACE} 0%, {EXEC_BG} 100%);
-    padding: 10px; border-radius: 6px; border: 1px solid #444;
+  background: linear-gradient(135deg, var(--exec-surface) 0%, var(--exec-bg) 100%);
+  padding: 10px; border-radius: 6px; border: 1px solid #444;
 }}
+
+/* Reduce space above Streamlit’s top header area */
+header[data-testid="stHeader"] {{
+  height: 0 !important; padding: 0 !important; background: transparent !important;
+}}
+
+/* Tighten tab strip and dividers */
+div[role="tablist"] {{ margin-top: 6px !important; margin-bottom: 6px !important; }}
+hr {{ margin: 6px 0 !important; }}
+
+/* Keep the first content block close to the header */
+[data-testid="stVerticalBlock"] > div:has(.main-header) + div {{ margin-top: 6px !important; }}
+
+/* Tables and charts minimal spacing */
+[data-testid="stDataFrame"] {{ margin-top: 6px !important; }}
+.element-container:has(.plotly) {{ margin-top: 6px !important; }}
+
+/* Legends wrap horizontally with less footprint */
+g.legend {{ transform: translate(0, -10px); }}  /* small nudge upward */
 </style>
 """, unsafe_allow_html=True)
-
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
