@@ -52,19 +52,6 @@ section.main > div.block-container {{
   max-width: 100% !important;
 }}
 
-/* Header card */
-.main-header {{
-  background: linear-gradient(135deg, var(--exec-bg) 0%, var(--exec-surface) 100%);
-  color: var(--exec-primary);
-  padding: 12px 16px !important;       /* tighter padding */
-  border-radius: 12px;
-  border: 1.5px solid var(--exec-primary);
-  text-align: center;
-  box-shadow: 0 8px 16px rgba(0,0,0,.35);
-  margin: 0 !important;                 /* remove outer margin */
-}}
-.main-header h1 {{ color: var(--exec-primary); margin: 0 0 2px 0 !important; }}
-.main-header h3 {{ color: var(--exec-blue); margin: 0 !important; }}
 
 /* Metric cards */
 div[data-testid="metric-container"] {{
