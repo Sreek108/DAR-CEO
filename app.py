@@ -471,11 +471,23 @@ def show_executive_summary(d):
 st.markdown("---")
 st.subheader("Lead conversion snapshot")
 
-def norm(df):
-    if df is None: return None
-    out = df.copy()
-    out.columns = out.columns.str.strip().str.lower()
-    return out
+def _get_d():
+    # 1) if global d already exists, reuse it
+    try:
+        return d  # noqa: F821
+    except NameError:
+        pass
+    # 2) prefer session_state cache
+    if "tables" in st.session_state and isinstance(st.session_state["tables"], dict):
+        return st.session_state["tables"]
+    # 3) last resort: load once and cache
+    if "load_data" in globals():
+        tables = load_data()
+        st.session_state["tables"] = tables
+        return tables
+    return {}
+
+d = _get_d()
 
 # FIX: use existing loader keys
 leads          = norm(d.get("leads"))
