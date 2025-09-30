@@ -471,7 +471,7 @@ def show_executive_summary(d):
     st.markdown("---")
     st.subheader("Lead conversion snapshot")
 
-    # define helper first, then call
+    # 1) Define the helper FIRST (fully indented body, no imports here)
     def render_funnel_and_markets(d):
         # normalize helper
         def _norm(df):
@@ -675,9 +675,8 @@ def show_executive_summary(d):
         else:
             st.info("Country data unavailable to build the market list.")
 
-    # now call the helper
+    # 2) Now call the helper AFTER it is defined
     render_funnel_and_markets(d)
-
 
 # -----------------------------------------------------------------------------
 # AI Insights page (Propensity + Expected Value + Actions + Forecast + Best Contact Time)
