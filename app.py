@@ -471,65 +471,64 @@ def show_executive_summary(d):
 st.markdown("---")
 st.subheader("Lead conversion snapshot")
 
-# Expect d to contain: leads, lead_statuses, lead_stages, agent_meeting_assignment,
-# lead_transactions, task_types, meeting_statuses (any missing tables are handled)
 def norm(df):
     if df is None: return None
     out = df.copy()
     out.columns = out.columns.str.strip().str.lower()
     return out
 
-leads           = norm(d.get("leads"))
-statuses        = norm(d.get("lead_statuses"))
-stages          = norm(d.get("lead_stages"))
-ama             = norm(d.get("agent_meeting_assignment"))
-trx             = norm(d.get("lead_transactions"))
-task_types      = norm(d.get("task_types"))
-meeting_status  = norm(d.get("meeting_statuses"))
+# FIX: use existing loader keys
+leads          = norm(d.get("leads"))
+statuses       = norm(d.get("lead_statuses"))
+stages         = norm(d.get("lead_stages"))
+ama            = norm(d.get("agent_meeting_assignment"))
+trx            = norm(d.get("transactions"))          # <-- was 'lead_transactions'
+task_types     = norm(d.get("task_types"))
+meeting_status = norm(d.get("meeting_status"))        # <-- was 'meeting_statuses'
 
 if leads is None or "leadid" not in leads.columns:
     st.info("Leads table not available")
 else:
-    # Snapshot date
     snapshot_dt = st.session_state.get("snapshot_dt", pd.Timestamp.today().normalize())
 
-    # Parse dates
-    for c in ["createdon"]:
-        if c in leads.columns:
-            leads[c] = pd.to_datetime(leads[c], errors="coerce")
+    # Date parsing
+    if "createdon" in leads.columns:
+        leads["createdon"] = pd.to_datetime(leads["createdon"], errors="coerce")
     if ama is not None and "startdatetime" in ama.columns:
         ama["startdatetime"] = pd.to_datetime(ama["startdatetime"], errors="coerce")
     if trx is not None and "transactiondate" in trx.columns:
         trx["transactiondate"] = pd.to_datetime(trx["transactiondate"], errors="coerce")
 
-    # Helpers
+    # Lookups
     def ids_from_status_names(names):
         if statuses is None or {"leadstatusid","statusname_e"} - set(statuses.columns): return set()
-        return set(statuses.loc[statuses["statusname_e"].str.lower().isin([n.lower() for n in names]),
-                                "leadstatusid"].dropna().astype(int))
+        return set(
+            statuses.loc[statuses["statusname_e"].str.lower().isin([n.lower() for n in names]), "leadstatusid"]
+            .dropna().astype(int)
+        )
 
     def ids_from_stage_names(stage_names):
-        # map StageName_E -> LeadStatusId via statuses.join(stages)
         if statuses is None or stages is None: return set()
         need_s = {"leadstatusid","leadstageid","statusname_e"} - set(statuses.columns)
         need_t = {"leadstageid","stagename_e"} - set(stages.columns)
         if need_s or need_t: return set()
         j = statuses.merge(stages[["leadstageid","stagename_e"]], on="leadstageid", how="left")
-        return set(j.loc[j["stagename_e"].str.lower().isin([n.lower() for n in stage_names]),
-                         "leadstatusid"].dropna().astype(int))
+        return set(
+            j.loc[j["stagename_e"].str.lower().isin([n.lower() for n in stage_names]), "leadstatusid"]
+            .dropna().astype(int)
+        )
 
     def task_ids(names):
         if task_types is None or {"tasktypeid","typename_e"} - set(task_types.columns): return set()
-        return set(task_types.loc[task_types["typename_e"].str.lower().isin([n.lower() for n in names]),
-                                  "tasktypeid"].dropna().astype(int))
+        return set(task_types.loc[task_types["typename_e"].str.lower().isin([n.lower() for n in names]), "tasktypeid"]
+                   .dropna().astype(int))
 
     def meeting_status_ids(names):
         if meeting_status is not None and {"meetingstatusid","statusname_e"}.issubset(meeting_status.columns):
             return set(meeting_status.loc[meeting_status["statusname_e"].str.lower().isin([n.lower() for n in names]),
                                           "meetingstatusid"].dropna().astype(int))
-        return {1, 6}  # fallback: Scheduled/Confirmed
+        return {1,6}  # fallback
 
-    # Semantic mappings
     qualified_sid = ids_from_stage_names(["Qualified"]) or ids_from_status_names(["Qualified"])
     won_sid       = ids_from_status_names(["Won"])
     lost_sid      = ids_from_status_names(["Lost"])
@@ -538,14 +537,14 @@ else:
     lost_ttid     = task_ids(["Lost","Cancelled","Closed - Lost"])
     meeting_ok    = meeting_status_ids(["Scheduled","Confirmed","Rescheduled"])
 
-    # Cohort as-of snapshot
+    # Cohort and safe column subset
     cohort = leads.copy()
     if "createdon" in cohort.columns:
         cohort = cohort[(cohort["createdon"].isna()) | (cohort["createdon"] <= snapshot_dt)]
-    cohort = cohort[["leadid","leadstatusid","leadsourceid","assignedagentid","leadstageid"]].copy()
+    keep_cols = [c for c in ["leadid","leadstatusid","leadsourceid","assignedagentid","leadstageid"] if c in cohort.columns]
+    cohort = cohort[keep_cols].copy()
 
-    # Per-lead evidence flags (vectorized)
-    # Meetings
+    # Evidence flags (vectorized)
     meet_flag = pd.Series(False, index=cohort["leadid"])
     if ama is not None and {"leadid","meetingstatusid","startdatetime"}.issubset(ama.columns):
         m = ama.loc[
@@ -558,7 +557,6 @@ else:
             meet_flag = m.groupby("leadid").size().ge(1)
     meet_flag.name = "has_meeting"
 
-    # Transactions
     nego_flag = pd.Series(False, index=cohort["leadid"])
     signed_tx = pd.Series(False, index=cohort["leadid"])
     lost_tx   = pd.Series(False, index=cohort["leadid"])
@@ -576,46 +574,51 @@ else:
                 if not l.empty: lost_tx = l.groupby("leadid").size().ge(1)
     nego_flag.name, signed_tx.name, lost_tx.name = "negotiation_tx","signed_tx","lost_tx"
 
-    # Join flags back to cohort
-    cohort = cohort.set_index("leadid")
-    cohort = cohort.join(meet_flag, how="left").join(nego_flag, how="left").join(signed_tx, how="left").join(lost_tx, how="left")
+    # Join flags
+    cohort = cohort.set_index("leadid").join([meet_flag, nego_flag, signed_tx, lost_tx], how="left")
     cohort[["has_meeting","negotiation_tx","signed_tx","lost_tx"]] = cohort[["has_meeting","negotiation_tx","signed_tx","lost_tx"]].fillna(False)
 
-    # Status flags (based on current status as-of latest row)
-    cohort["qualified_now"] = cohort["leadstatusid"].isin(qualified_sid) if qualified_sid else False
-    cohort["signed_now"]    = cohort["leadstatusid"].isin(won_sid) if won_sid else False
-    cohort["lost_now"]      = cohort["leadstatusid"].isin(lost_sid) if lost_sid else False
+    # Status flags
+    cohort["qualified_now"] = cohort.get("leadstatusid", pd.Series(index=cohort.index)).isin(qualified_sid) if qualified_sid else False
+    cohort["signed_now"]    = cohort.get("leadstatusid", pd.Series(index=cohort.index)).isin(won_sid) if won_sid else False
+    cohort["lost_now"]      = cohort.get("leadstatusid", pd.Series(index=cohort.index)).isin(lost_sid) if lost_sid else False
 
-    # Exclusive current stage, ordered by terminal precedence
-    is_signed      = cohort["signed_now"] | cohort["signed_tx"]
-    is_lost        = (~is_signed) & (cohort["lost_now"] | cohort["lost_tx"])
-    is_nego        = (~is_signed) & (~is_lost) & cohort["negotiation_tx"]
-    is_meeting     = (~is_signed) & (~is_lost) & (~is_nego) & cohort["has_meeting"]
-    is_qualified   = (~is_signed) & (~is_lost) & (~is_nego) & (~is_meeting) & cohort["qualified_now"]
+    # Exclusive current stage precedence
+    is_signed    = cohort["signed_now"] | cohort["signed_tx"]
+    is_lost      = (~is_signed) & (cohort["lost_now"] | cohort["lost_tx"])
+    is_nego      = (~is_signed) & (~is_lost) & cohort["negotiation_tx"]
+    is_meeting   = (~is_signed) & (~is_lost) & (~is_nego) & cohort["has_meeting"]
+    is_qualified = (~is_signed) & (~is_lost) & (~is_nego) & (~is_meeting) & cohort["qualified_now"]
 
     stage = np.select(
         [is_signed, is_lost, is_nego, is_meeting, is_qualified],
         ["Contract Signed","Lost","Negotiation","Meeting Scheduled","Qualified"],
         default="New"
     )
-    cohort["Stage"] = pd.Categorical(stage,
+    cohort["Stage"] = pd.Categorical(
+        stage,
         categories=["New","Qualified","Meeting Scheduled","Negotiation","Contract Signed","Lost"],
         ordered=True
     )
 
-    # Aggregate counts
-    funnel = cohort.groupby("Stage").size().reindex(cohort["Stage"].cat.categories, fill_value=0).reset_index(name="Count")
-    new_total = max(int(funnel.loc[funnel["Stage"]=="New","Count"].values[0]), 1)
+    # Aggregate and render
+    funnel = (
+        cohort.groupby("Stage").size()
+        .reindex(cohort["Stage"].cat.categories, fill_value=0)
+        .reset_index(name="Count")
+    )
+    new_total = max(int(funnel.loc[funnel["Stage"].eq("New"), "Count"].iloc[0]), 1)
     funnel["Label"] = (funnel["Count"] / new_total * 100).round(1).astype(str) + "%"
 
-    # Plot
-    color_seq = ["#4A90E2", "#50E3C2", "#2D9CDB", "#FFA500", "#7CFC00", "#E74C3C"]
-    fig = px.funnel(funnel, x="Count", y="Stage", text="Label", color="Stage",
-                    color_discrete_sequence=color_seq)
+    fig = px.funnel(
+        funnel, x="Count", y="Stage", text="Label", color="Stage",
+        color_discrete_sequence=["#4A90E2","#50E3C2","#2D9CDB","#FFA500","#7CFC00","#E74C3C"]
+    )
     fig.update_traces(textposition="inside", textfont_color="black")
-    fig.update_layout(height=360, margin=dict(l=0, r=0, t=10, b=10),
+    fig.update_layout(height=360, margin=dict(l=0,r=0,t=10,b=10),
                       plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
     st.plotly_chart(fig, use_container_width=True)
+
 
     # Top markets: Country, Leads, Won/Signed
     st.markdown("---"); st.subheader("Top markets")
