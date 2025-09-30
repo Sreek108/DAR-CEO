@@ -467,57 +467,45 @@ def show_executive_summary(d):
         with s2: st.plotly_chart(tile_bullet(conv_ts,"Conversion index",EXEC_GREEN), use_container_width=True)
         with s3: st.plotly_chart(tile_bullet(meet_ts,"Meetings index",EXEC_PRIMARY), use_container_width=True)
 
-# Lead conversion snapshot (funnel)
-st.markdown("---")
-st.subheader("Lead conversion snapshot")
+    # Lead conversion snapshot (funnel)
+    st.markdown("---")
+    render_funnel_and_markets(d)
+    st.subheader("Lead conversion snapshot")
 
-def _get_d():
-    # 1) if global d already exists, reuse it
-    try:
-        return d  # noqa: F821
-    except NameError:
-        pass
-    # 2) prefer session_state cache
-    if "tables" in st.session_state and isinstance(st.session_state["tables"], dict):
-        return st.session_state["tables"]
-    # 3) last resort: load once and cache
-    if "load_data" in globals():
-        tables = load_data()
-        st.session_state["tables"] = tables
-        return tables
-    return {}
+    def render_funnel_and_markets(d):
+    import pandas as pd, numpy as np
+    import plotly.express as px
+    st.subheader("Lead conversion snapshot")
 
-d = _get_d()
+    def _norm(df):
+        if df is None: return None
+        x = df.copy(); x.columns = x.columns.str.strip().str.lower(); return x
 
-# FIX: use existing loader keys
-leads          = norm(d.get("leads"))
-statuses       = norm(d.get("lead_statuses"))
-stages         = norm(d.get("lead_stages"))
-ama            = norm(d.get("agent_meeting_assignment"))
-trx            = norm(d.get("transactions"))          # <-- was 'lead_transactions'
-task_types     = norm(d.get("task_types"))
-meeting_status = norm(d.get("meeting_status"))        # <-- was 'meeting_statuses'
+    # use keys produced by load_data()
+    leads          = _norm(d.get("leads"))
+    statuses       = _norm(d.get("lead_statuses"))
+    stages         = _norm(d.get("lead_stages"))
+    ama            = _norm(d.get("agent_meeting_assignment"))
+    trx            = _norm(d.get("transactions"))          # align to loader
+    task_types     = _norm(d.get("task_types"))
+    meeting_status = _norm(d.get("meeting_status"))        # align to loader
+    countries      = d.get("countries")                    # for “Top markets”
 
-if leads is None or "leadid" not in leads.columns:
-    st.info("Leads table not available")
-else:
+    if leads is None or "leadid" not in leads.columns:
+        st.info("Leads table not available"); return
+
+    # snapshot date
     snapshot_dt = st.session_state.get("snapshot_dt", pd.Timestamp.today().normalize())
 
-    # Date parsing
-    if "createdon" in leads.columns:
-        leads["createdon"] = pd.to_datetime(leads["createdon"], errors="coerce")
-    if ama is not None and "startdatetime" in ama.columns:
-        ama["startdatetime"] = pd.to_datetime(ama["startdatetime"], errors="coerce")
-    if trx is not None and "transactiondate" in trx.columns:
-        trx["transactiondate"] = pd.to_datetime(trx["transactiondate"], errors="coerce")
+    # dates
+    if "createdon" in leads.columns: leads["createdon"] = pd.to_datetime(leads["createdon"], errors="coerce")
+    if ama is not None and "startdatetime" in ama.columns: ama["startdatetime"] = pd.to_datetime(ama["startdatetime"], errors="coerce")
+    if trx is not None and "transactiondate" in trx.columns: trx["transactiondate"] = pd.to_datetime(trx["transactiondate"], errors="coerce")
 
-    # Lookups
+    # lookups
     def ids_from_status_names(names):
         if statuses is None or {"leadstatusid","statusname_e"} - set(statuses.columns): return set()
-        return set(
-            statuses.loc[statuses["statusname_e"].str.lower().isin([n.lower() for n in names]), "leadstatusid"]
-            .dropna().astype(int)
-        )
+        return set(statuses.loc[statuses["statusname_e"].str.lower().isin([n.lower() for n in names]), "leadstatusid"].dropna().astype(int))
 
     def ids_from_stage_names(stage_names):
         if statuses is None or stages is None: return set()
@@ -525,21 +513,16 @@ else:
         need_t = {"leadstageid","stagename_e"} - set(stages.columns)
         if need_s or need_t: return set()
         j = statuses.merge(stages[["leadstageid","stagename_e"]], on="leadstageid", how="left")
-        return set(
-            j.loc[j["stagename_e"].str.lower().isin([n.lower() for n in stage_names]), "leadstatusid"]
-            .dropna().astype(int)
-        )
+        return set(j.loc[j["stagename_e"].str.lower().isin([n.lower() for n in stage_names]), "leadstatusid"].dropna().astype(int))
 
     def task_ids(names):
         if task_types is None or {"tasktypeid","typename_e"} - set(task_types.columns): return set()
-        return set(task_types.loc[task_types["typename_e"].str.lower().isin([n.lower() for n in names]), "tasktypeid"]
-                   .dropna().astype(int))
+        return set(task_types.loc[task_types["typename_e"].str.lower().isin([n.lower() for n in names]), "tasktypeid"].dropna().astype(int))
 
     def meeting_status_ids(names):
         if meeting_status is not None and {"meetingstatusid","statusname_e"}.issubset(meeting_status.columns):
-            return set(meeting_status.loc[meeting_status["statusname_e"].str.lower().isin([n.lower() for n in names]),
-                                          "meetingstatusid"].dropna().astype(int))
-        return {1,6}  # fallback
+            return set(meeting_status.loc[meeting_status["statusname_e"].str.lower().isin([n.lower() for n in names]), "meetingstatusid"].dropna().astype(int))
+        return {1,6}
 
     qualified_sid = ids_from_stage_names(["Qualified"]) or ids_from_status_names(["Qualified"])
     won_sid       = ids_from_status_names(["Won"])
@@ -549,25 +532,17 @@ else:
     lost_ttid     = task_ids(["Lost","Cancelled","Closed - Lost"])
     meeting_ok    = meeting_status_ids(["Scheduled","Confirmed","Rescheduled"])
 
-    # Cohort and safe column subset
+    # cohort and safe subset
     cohort = leads.copy()
-    if "createdon" in cohort.columns:
-        cohort = cohort[(cohort["createdon"].isna()) | (cohort["createdon"] <= snapshot_dt)]
+    if "createdon" in cohort.columns: cohort = cohort[(cohort["createdon"].isna()) | (cohort["createdon"] <= snapshot_dt)]
     keep_cols = [c for c in ["leadid","leadstatusid","leadsourceid","assignedagentid","leadstageid"] if c in cohort.columns]
     cohort = cohort[keep_cols].copy()
 
-    # Evidence flags (vectorized)
+    # evidence flags
     meet_flag = pd.Series(False, index=cohort["leadid"])
     if ama is not None and {"leadid","meetingstatusid","startdatetime"}.issubset(ama.columns):
-        m = ama.loc[
-            ama["leadid"].isin(cohort["leadid"])
-            & ama["meetingstatusid"].isin(meeting_ok)
-            & (ama["startdatetime"] <= snapshot_dt),
-            ["leadid"]
-        ]
-        if not m.empty:
-            meet_flag = m.groupby("leadid").size().ge(1)
-    meet_flag.name = "has_meeting"
+        m = ama.loc[ama["leadid"].isin(cohort["leadid"]) & ama["meetingstatusid"].isin(meeting_ok) & (ama["startdatetime"] <= snapshot_dt), ["leadid"]]
+        if not m.empty: meet_flag = m.groupby("leadid").size().ge(1)
 
     nego_flag = pd.Series(False, index=cohort["leadid"])
     signed_tx = pd.Series(False, index=cohort["leadid"])
@@ -584,67 +559,58 @@ else:
             if lost_ttid:
                 l = base.loc[base["tasktypeid"].isin(lost_ttid), ["leadid"]]
                 if not l.empty: lost_tx = l.groupby("leadid").size().ge(1)
-    nego_flag.name, signed_tx.name, lost_tx.name = "negotiation_tx","signed_tx","lost_tx"
 
-    # Join flags
-    cohort = cohort.set_index("leadid").join([meet_flag, nego_flag, signed_tx, lost_tx], how="left")
+    cohort = cohort.set_index("leadid").join([meet_flag.rename("has_meeting"),
+                                              nego_flag.rename("negotiation_tx"),
+                                              signed_tx.rename("signed_tx"),
+                                              lost_tx.rename("lost_tx")], how="left")
     cohort[["has_meeting","negotiation_tx","signed_tx","lost_tx"]] = cohort[["has_meeting","negotiation_tx","signed_tx","lost_tx"]].fillna(False)
 
-    # Status flags
     cohort["qualified_now"] = cohort.get("leadstatusid", pd.Series(index=cohort.index)).isin(qualified_sid) if qualified_sid else False
     cohort["signed_now"]    = cohort.get("leadstatusid", pd.Series(index=cohort.index)).isin(won_sid) if won_sid else False
     cohort["lost_now"]      = cohort.get("leadstatusid", pd.Series(index=cohort.index)).isin(lost_sid) if lost_sid else False
 
-    # Exclusive current stage precedence
     is_signed    = cohort["signed_now"] | cohort["signed_tx"]
     is_lost      = (~is_signed) & (cohort["lost_now"] | cohort["lost_tx"])
     is_nego      = (~is_signed) & (~is_lost) & cohort["negotiation_tx"]
     is_meeting   = (~is_signed) & (~is_lost) & (~is_nego) & cohort["has_meeting"]
     is_qualified = (~is_signed) & (~is_lost) & (~is_nego) & (~is_meeting) & cohort["qualified_now"]
 
-    stage = np.select(
-        [is_signed, is_lost, is_nego, is_meeting, is_qualified],
-        ["Contract Signed","Lost","Negotiation","Meeting Scheduled","Qualified"],
-        default="New"
-    )
-    cohort["Stage"] = pd.Categorical(
-        stage,
+    stage = np.select([is_signed, is_lost, is_nego, is_meeting, is_qualified],
+                      ["Contract Signed","Lost","Negotiation","Meeting Scheduled","Qualified"], default="New")
+    cohort["Stage"] = pd.Categorical(stage,
         categories=["New","Qualified","Meeting Scheduled","Negotiation","Contract Signed","Lost"],
-        ordered=True
-    )
+        ordered=True)
 
-    # Aggregate and render
-    funnel = (
-        cohort.groupby("Stage").size()
-        .reindex(cohort["Stage"].cat.categories, fill_value=0)
-        .reset_index(name="Count")
-    )
+    funnel = cohort.groupby("Stage").size().reindex(cohort["Stage"].cat.categories, fill_value=0).reset_index(name="Count")
     new_total = max(int(funnel.loc[funnel["Stage"].eq("New"), "Count"].iloc[0]), 1)
-    funnel["Label"] = (funnel["Count"] / new_total * 100).round(1).astype(str) + "%"
+    funnel["Label"] = (funnel["Count"]/new_total*100).round(1).astype(str) + "%"
 
-    fig = px.funnel(
-        funnel, x="Count", y="Stage", text="Label", color="Stage",
-        color_discrete_sequence=["#4A90E2","#50E3C2","#2D9CDB","#FFA500","#7CFC00","#E74C3C"]
-    )
+    fig = px.funnel(funnel, x="Count", y="Stage", text="Label", color="Stage",
+                    color_discrete_sequence=["#4A90E2","#50E3C2","#2D9CDB","#FFA500","#7CFC00","#E74C3C"])
     fig.update_traces(textposition="inside", textfont_color="black")
     fig.update_layout(height=360, margin=dict(l=0,r=0,t=10,b=10),
                       plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
     st.plotly_chart(fig, use_container_width=True)
 
-
-    # Top markets: Country, Leads, Won/Signed
+    # Top markets (uses same d in-scope)
     st.markdown("---"); st.subheader("Top markets")
-    if countries is not None and "CountryId" in leads_df.columns and "countryname_e" in countries.columns:
-        leads_df = leads_df.copy()
-        leads_df["CountryId"] = pd.to_numeric(leads_df["CountryId"], errors="coerce").astype("Int64")
-        leads_df["LeadStatusId"] = pd.to_numeric(leads_df.get("LeadStatusId", pd.NA), errors="coerce").astype("Int64")
-        by_country = leads_df.groupby("CountryId", dropna=True).size().reset_index(name="Leads")
-        won_by_country = leads_df.loc[leads_df["LeadStatusId"]==won_status_id].groupby("CountryId", dropna=True).size().reset_index(name="Won")
-        final = (by_country.merge(won_by_country, on="CountryId", how="left")
-                           .merge(countries[["countryid","countryname_e"]].rename(columns={"countryid":"CountryId","countryname_e":"Country"}), on="CountryId", how="left")
-                           .fillna({"Won":0})
-                           .sort_values(["Leads","Won"], ascending=False)[["Country","Leads","Won"]])
-        st.dataframe(final, use_container_width=True, hide_index=True,
+    if countries is not None and d.get("leads") is not None and "CountryId" in d["leads"].columns and "countryname_e" in countries.columns:
+        L = d["leads"].copy()
+        L["CountryId"] = pd.to_numeric(L["CountryId"], errors="coerce").astype("Int64")
+        L["LeadStatusId"] = pd.to_numeric(L.get("LeadStatusId", pd.NA), errors="coerce").astype("Int64")
+        # resolve Won id from master
+        won_id = 9
+        if statuses is not None and {"statusname_e","leadstatusid"}.issubset(statuses.columns):
+            m = statuses.loc[statuses["statusname_e"].str.lower()=="won"]
+            if not m.empty: won_id = int(m.iloc[0]["leadstatusid"])
+        by_country = L.groupby("CountryId", dropna=True).size().reset_index(name="Leads")
+        won_by_country = L.loc[L["LeadStatusId"].eq(won_id)].groupby("CountryId", dropna=True).size().reset_index(name="Won")
+        view = (by_country.merge(won_by_country, on="CountryId", how="left")
+                         .merge(countries.rename(columns={"countryid":"CountryId","countryname_e":"Country"})[["CountryId","Country"]], on="CountryId", how="left")
+                         .fillna({"Won":0})
+                         .sort_values(["Leads","Won"], ascending=False)[["Country","Leads","Won"]])
+        st.dataframe(view, use_container_width=True, hide_index=True,
                      column_config={"Leads": st.column_config.NumberColumn("Leads", format="%d"),
                                     "Won":   st.column_config.NumberColumn("Won/Signed", format="%d")})
     else:
