@@ -468,60 +468,184 @@ def show_executive_summary(d):
         with s3: st.plotly_chart(tile_bullet(meet_ts,"Meetings index",EXEC_PRIMARY), use_container_width=True)
 
     # Lead conversion snapshot (funnel)
-    st.markdown("---"); st.subheader("Lead conversion snapshot")
-
-    leads_df   = d.get("leads").copy()
-    statuses   = d.get("lead_statuses")
-    ama        = d.get("agent_meeting_assignment")
-
-    def have(df, cols): 
-        return (df is not None) and set(cols).issubset(df.columns)
-    def status_ids_by_name(names):
-        if statuses is None: return set()
-        s = statuses.copy(); s.columns = s.columns.str.lower()
-        if not {"statusname_e","leadstatusid"}.issubset(s.columns): return set()
-        return set(s.loc[s["statusname_e"].str.lower().isin([n.lower() for n in names]), "leadstatusid"].astype(int).tolist())
-    def status_ids_by_stage(stage_no):
-        if statuses is None: return set()
-        s = statuses.copy(); s.columns = s.columns.str.lower()
-        if not {"leadstageid","leadstatusid"}.issubset(s.columns): return set()
-        return set(s.loc[s["leadstageid"].astype("Int64")==stage_no, "leadstatusid"].astype(int).tolist())
-
-    cohort_ids = pd.Index(leads_df["LeadId"].dropna().astype(int).unique()) if have(leads_df, ["LeadId"]) else pd.Index([])
-    new_count  = int(cohort_ids.size)
-
-    q_sid   = status_ids_by_stage(2)
-    qual_ids = pd.Index(leads_df.loc[have(leads_df, ["LeadStatusId","LeadId"]) & leads_df["LeadStatusId"].isin(q_sid),"LeadId"].dropna().astype(int).unique()).intersection(cohort_ids)
-    qualified_count = int(qual_ids.size)
-
-    meet_ids = pd.Index([])
-    if ama is not None:
-        m = ama.copy(); m.columns = m.columns.str.lower()
-        if {"leadid","meetingstatusid"}.issubset(m.columns):
-            m = m[m["leadid"].isin(qual_ids)]
-            m = m[m["meetingstatusid"].isin({1,6})]
-            meet_ids = pd.Index(m["leadid"].dropna().astype(int).unique())
-    meeting_count = int(meet_ids.size)
-
-    neg_sid = status_ids_by_name(["On Hold","Awaiting Budget"])
-    neg_ids = pd.Index(leads_df.loc[have(leads_df, ["LeadStatusId","LeadId"]) & leads_df["LeadStatusId"].isin(neg_sid),"LeadId"].dropna().astype(int).unique()).intersection(meet_ids)
-    neg_count = int(neg_ids.size)
-
-    won_sid = status_ids_by_name(["Won"])
-    signed_ids = pd.Index(leads_df.loc[have(leads_df, ["LeadStatusId","LeadId"]) & leads_df["LeadStatusId"].isin(won_sid),"LeadId"].dropna().astype(int).unique()).intersection(meet_ids)
-    signed_count = int(signed_ids.size)
-
-    lost_sid = status_ids_by_name(["Lost"])
-    lost_ids = pd.Index(leads_df.loc[have(leads_df, ["LeadStatusId","LeadId"]) & leads_df["LeadStatusId"].isin(lost_sid),"LeadId"].dropna().astype(int).unique()).intersection(meet_ids)
-    lost_count = int(lost_ids.size)
-
-    funnel_df = pd.DataFrame({"Stage":["New","Qualified","Meeting Scheduled","Negotiation","Contract Signed","Lost"],
-                              "Count":[new_count, qualified_count, meeting_count, neg_count, signed_count, lost_count]})
-    fig = px.funnel(funnel_df, x="Count", y="Stage",
-                    color_discrete_sequence=[EXEC_BLUE, EXEC_GREEN, EXEC_PRIMARY, "#FFA500", "#7CFC00", EXEC_DANGER])
-    fig.update_layout(height=340, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="white",
-                      margin=dict(l=0, r=0, t=10, b=10))
-    st.plotly_chart(fig, use_container_width=True)
+    st.markdown("---")
+    st.subheader("Lead conversion snapshot")
+    
+    # Expect these DataFrames in d: leads, lead_statuses, lead_stages, agent_meeting_assignment,
+    # lead_transactions, task_types, meeting_statuses
+    leads = d.get("leads")
+    statuses = d.get("lead_statuses")
+    stages = d.get("lead_stages")
+    ama = d.get("agent_meeting_assignment")
+    trx = d.get("lead_transactions")
+    task_types = d.get("task_types")
+    meet_statuses = d.get("meeting_statuses")
+    
+    def norm(df):
+        if df is None:
+            return None
+        df = df.copy()
+        df.columns = df.columns.str.strip().str.lower()
+        return df
+    
+    leads = norm(leads)
+    statuses = norm(statuses)
+    stages = norm(stages)
+    ama = norm(ama)
+    trx = norm(trx)
+    task_types = norm(task_types)
+    meet_statuses = norm(meet_statuses)
+    
+    if leads is None or "leadid" not in leads.columns:
+        st.info("Leads table not available.")
+    else:
+        # Optional snapshot date (use UI control if desired)
+        snapshot_dt = st.session_state.get("snapshot_dt", pd.Timestamp.today().normalize())
+        # Ensure datetime parsing for relevant columns
+        for col in ["createdon"]:
+            if col in leads.columns:
+                leads[col] = pd.to_datetime(leads[col], errors="coerce")
+    
+        if ama is not None and "startdatetime" in ama.columns:
+            ama["startdatetime"] = pd.to_datetime(ama["startdatetime"], errors="coerce")
+    
+        if trx is not None and "transactiondate" in trx.columns:
+            trx["transactiondate"] = pd.to_datetime(trx["transactiondate"], errors="coerce")
+    
+        # Helpers to get IDs from names/dimensions
+        def get_stage_ids(stage_names):
+            if stages is not None and {"leadstageid","stagename_e"}.issubset(stages.columns):
+                return set(stages.loc[stages["stagename_e"].str.lower().isin([s.lower() for s in stage_names]),
+                                      "leadstageid"].dropna().astype(int))
+            return set()
+    
+        def get_status_ids_by_stage_names(stage_names):
+            # Join statuses -> stages if possible, else fallback to status names
+            if statuses is not None:
+                if {"leadstatusid","leadstageid","statusname_e"}.issubset(statuses.columns) and stages is not None and \
+                   {"leadstageid","stagename_e"}.issubset(stages.columns):
+                    stg = stages[["leadstageid","stagename_e"]].dropna()
+                    stg = stg[stg["stagename_e"].str.len()>0]
+                    s = statuses.merge(stg, on="leadstageid", how="left")
+                    return set(s.loc[s["stagename_e"].str.lower().isin([n.lower() for n in stage_names]),
+                                     "leadstatusid"].dropna().astype(int))
+                if {"leadstatusid","statusname_e"}.issubset(statuses.columns):
+                    return set(statuses.loc[statuses["statusname_e"].str.lower().isin([n.lower() for n in stage_names]),
+                                            "leadstatusid"].dropna().astype(int))
+            return set()
+    
+        def get_status_ids_by_status_names(status_names):
+            if statuses is None or {"leadstatusid","statusname_e"} - set(statuses.columns):
+                return set()
+            return set(statuses.loc[statuses["statusname_e"].str.lower().isin([n.lower() for n in status_names]),
+                                    "leadstatusid"].dropna().astype(int))
+    
+        def get_tasktype_ids(type_names):
+            if task_types is None or {"tasktypeid","typename_e"} - set(task_types.columns):
+                return set()
+            return set(task_types.loc[task_types["typename_e"].str.lower().isin([n.lower() for n in type_names]),
+                                      "tasktypeid"].dropna().astype(int))
+    
+        def get_meeting_status_ids(names):
+            if meet_statuses is not None and {"meetingstatusid","statusname_e"}.issubset(meet_statuses.columns):
+                return set(meet_statuses.loc[meet_statuses["statusname_e"].str.lower()
+                                             .isin([n.lower() for n in names]),
+                                             "meetingstatusid"].dropna().astype(int))
+            # Fallback if MeetingStatus table is not provided
+            return {1, 6}  # e.g., Scheduled/Confirmed (adjust if needed)
+    
+        # Define the semantic rules for each layer
+        qualified_status_ids = get_status_ids_by_stage_names(["Qualified"])
+        if not qualified_status_ids:
+            qualified_status_ids = get_status_ids_by_status_names(["Qualified"])
+    
+        won_status_ids = get_status_ids_by_status_names(["Won"])
+        lost_status_ids = get_status_ids_by_status_names(["Lost"])
+        negotiation_task_ids = get_tasktype_ids(["Negotiation", "Proposal"])
+        signed_task_ids = get_tasktype_ids(["Contract Signed", "Signed"])
+        lost_task_ids = get_tasktype_ids(["Lost", "Cancelled", "Closed - Lost"])
+        meeting_status_ids = get_meeting_status_ids(["Scheduled", "Confirmed", "Rescheduled"])
+    
+        # Cohort: all leads existing as-of snapshot
+        cohort = leads.copy()
+        if "createdon" in cohort.columns:
+            cohort = cohort.loc[(cohort["createdon"].isna()) | (cohort["createdon"] <= snapshot_dt)]
+        cohort_ids = pd.Index(cohort["leadid"].dropna().astype(int).unique())
+        new_count = int(cohort_ids.size)
+    
+        # Qualified: current status maps to Qualified
+        qualified_ids = pd.Index([])
+        if {"leadid","leadstatusid"}.issubset(leads.columns) and qualified_status_ids:
+            q = leads.loc[leads["leadid"].isin(cohort_ids) & leads["leadstatusid"].isin(qualified_status_ids), "leadid"]
+            qualified_ids = pd.Index(q.dropna().astype(int).unique())
+        qualified_count = int(qualified_ids.size)
+    
+        # Meeting Scheduled: has a meeting with acceptable meeting status as-of snapshot
+        meeting_ids = pd.Index([])
+        if ama is not None and {"leadid","meetingstatusid","startdatetime"}.issubset(ama.columns):
+            m = ama.loc[ama["leadid"].isin(cohort_ids)
+                        & ama["meetingstatusid"].isin(meeting_status_ids)
+                        & (ama["startdatetime"] <= snapshot_dt), "leadid"]
+            meeting_ids = pd.Index(m.dropna().astype(int).unique()).intersection(qualified_ids if len(qualified_ids)>0 else cohort_ids)
+        meeting_count = int(meeting_ids.size)
+    
+        # Negotiation: has negotiation/proposal transactions as-of snapshot (after meeting by set intersection)
+        negotiation_ids = pd.Index([])
+        if trx is not None and {"leadid","tasktypeid","transactiondate"}.issubset(trx.columns) and negotiation_task_ids:
+            n = trx.loc[trx["leadid"].isin(meeting_ids if len(meeting_ids)>0 else cohort_ids)
+                        & trx["tasktypeid"].isin(negotiation_task_ids)
+                        & (trx["transactiondate"] <= snapshot_dt), "leadid"]
+            negotiation_ids = pd.Index(n.dropna().astype(int).unique())
+        negotiation_count = int(negotiation_ids.size)
+    
+        # Contract Signed: from status Won or signing transaction
+        signed_ids = pd.Index([])
+        sid_from_status = pd.Index([])
+        sid_from_trx = pd.Index([])
+        if {"leadid","leadstatusid"}.issubset(leads.columns) and len(won_status_ids) > 0:
+            s = leads.loc[leads["leadid"].isin(meeting_ids if len(meeting_ids)>0 else cohort_ids)
+                          & leads["leadstatusid"].isin(won_status_ids), "leadid"]
+            sid_from_status = pd.Index(s.dropna().astype(int).unique())
+        if trx is not None and {"leadid","tasktypeid","transactiondate"}.issubset(trx.columns) and signed_task_ids:
+            t = trx.loc[trx["leadid"].isin(meeting_ids if len(meeting_ids)>0 else cohort_ids)
+                        & trx["tasktypeid"].isin(signed_task_ids)
+                        & (trx["transactiondate"] <= snapshot_dt), "leadid"]
+            sid_from_trx = pd.Index(t.dropna().astype(int).unique())
+        signed_ids = sid_from_status.union(sid_from_trx)
+        signed_count = int(signed_ids.size)
+    
+        # Lost: from status Lost or lost/cancelled transaction (treat as terminal alternative to Signed)
+        lost_ids = pd.Index([])
+        lid_from_status = pd.Index([])
+        lid_from_trx = pd.Index([])
+        if {"leadid","leadstatusid"}.issubset(leads.columns) and len(lost_status_ids) > 0:
+            l = leads.loc[leads["leadid"].isin(meeting_ids if len(meeting_ids)>0 else cohort_ids)
+                          & leads["leadstatusid"].isin(lost_status_ids), "leadid"]
+            lid_from_status = pd.Index(l.dropna().astype(int).unique())
+        if trx is not None and {"leadid","tasktypeid","transactiondate"}.issubset(trx.columns) and lost_task_ids:
+            t = trx.loc[trx["leadid"].isin(meeting_ids if len(meeting_ids)>0 else cohort_ids)
+                        & trx["tasktypeid"].isin(lost_task_ids)
+                        & (trx["transactiondate"] <= snapshot_dt), "leadid"]
+            lid_from_trx = pd.Index(t.dropna().astype(int).unique())
+        lost_ids = lid_from_status.union(lid_from_trx).difference(signed_ids)  # prefer Signed over Lost
+        lost_count = int(lost_ids.size)
+    
+        # Assemble funnel (monotone totals reflect "reached this stage" counts)
+        funnel_df = pd.DataFrame({
+            "Stage": ["New","Qualified","Meeting Scheduled","Negotiation","Contract Signed","Lost"],
+            "Count": [new_count, len(qualified_ids), len(meeting_ids), len(negotiation_ids), len(signed_ids), len(lost_ids)]
+        })
+    
+        # Optional: show % of New in labels
+        funnel_df["Label"] = (funnel_df["Count"] / max(new_count, 1) * 100).round(1).astype(str) + "%"
+    
+        color_seq = ["#4A90E2", "#50E3C2", "#2D9CDB", "#FFA500", "#7CFC00", "#E74C3C"]
+        fig = px.funnel(funnel_df, x="Count", y="Stage", text="Label", color="Stage",
+                        color_discrete_sequence=color_seq)
+        fig.update_traces(textposition="inside", textfont_color="black")
+        fig.update_layout(height=360, margin=dict(l=0, r=0, t=10, b=10),
+                          plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, use_container_width=True)
 
     # Top markets: Country, Leads, Won/Signed
     st.markdown("---"); st.subheader("Top markets")
